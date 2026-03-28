@@ -44,8 +44,10 @@ android {
             excludes += listOf(
                 "META-INF/LICENSE",
                 "META-INF/LICENSE.txt",
+                "META-INF/LICENSE.md",
                 "META-INF/NOTICE",
                 "META-INF/NOTICE.txt",
+                "META-INF/NOTICE.md",
                 "META-INF/*.RSA",
                 "META-INF/*.SF",
                 "META-INF/*.DSA"

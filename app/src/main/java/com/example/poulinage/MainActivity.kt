@@ -1,6 +1,7 @@
 package com.example.poulinage
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -108,6 +109,8 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     // -------------------------------------------------------------------------
     LaunchedEffect(Unit) {
         reloadHistory()
+        // Refléter l'état réel du service au démarrage de l'UI
+        status = if (isServiceRunning(context)) "Surveillance active" else "Inactif"
     }
 
     // -------------------------------------------------------------------------
@@ -289,6 +292,18 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
 
         Spacer(Modifier.height(24.dp))
     }
+}
+
+// -------------------------------------------------------------------------
+// Vérifie si FoalingDetectionService est en cours d'exécution.
+// getRunningServices est déprécié depuis API 26 mais continue de fonctionner
+// pour les services de la propre application.
+// -------------------------------------------------------------------------
+@Suppress("DEPRECATION")
+private fun isServiceRunning(context: Context): Boolean {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    return manager.getRunningServices(Int.MAX_VALUE)
+        .any { it.service.className == FoalingDetectionService::class.java.name }
 }
 
 // -------------------------------------------------------------------------
