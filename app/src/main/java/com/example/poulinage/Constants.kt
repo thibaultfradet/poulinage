@@ -69,10 +69,16 @@ object Constants {
     // -------------------------------------------------------------------------
     const val ACTION_STATUS_UPDATE   = "com.example.poulinage.STATUS_UPDATE"
     const val ACTION_ALERT_FIRED     = "com.example.poulinage.ALERT_FIRED"
+    const val ACTION_SENSOR_VALUES   = "com.example.poulinage.SENSOR_VALUES"
     const val EXTRA_STATUS_MESSAGE   = "status_message"
     const val EXTRA_ALERT_TIMESTAMP  = "alert_timestamp"
     const val EXTRA_ALERT_TYPE       = "alert_type"
     const val EXTRA_ALERT_DETAIL     = "alert_detail"
+    const val EXTRA_ACCEL_MAGNITUDE  = "accel_magnitude"   // Float m/s²
+    const val EXTRA_GYRO_MAGNITUDE   = "gyro_magnitude"    // Float rad/s
+
+    /** Intervalle minimum entre deux broadcasts de valeurs capteur (ms) */
+    const val SENSOR_BROADCAST_INTERVAL_MS = 500L
 
     // -------------------------------------------------------------------------
     // Log tag

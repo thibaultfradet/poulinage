@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -89,8 +88,9 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     // -------------------------------------------------------------------------
     var status by remember { mutableStateOf("Inactif") }
     var phoneNumber by remember { mutableStateOf(prefs.getString(Constants.PREF_PHONE_NUMBER, "") ?: "") }
+    var accelMagnitude by remember { mutableStateOf(0f) }
+    var gyroMagnitude  by remember { mutableStateOf(0f) }
 
-    // Historique des alertes — chargé depuis SharedPreferences, mis à jour en temps réel
     val historyEvents = remember { mutableStateListOf<AlertHistory.Event>() }
 
     fun reloadHistory() {
@@ -109,7 +109,6 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     // -------------------------------------------------------------------------
     LaunchedEffect(Unit) {
         reloadHistory()
-        // Refléter l'état réel du service au démarrage de l'UI
         status = if (isServiceRunning(context)) "Surveillance active" else "Inactif"
     }
 
@@ -142,8 +141,11 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
                         status = intent.getStringExtra(Constants.EXTRA_STATUS_MESSAGE) ?: status
                     }
                     Constants.ACTION_ALERT_FIRED -> {
-                        // Rechargement depuis SharedPreferences pour garder l'UI en sync
                         reloadHistory()
+                    }
+                    Constants.ACTION_SENSOR_VALUES -> {
+                        accelMagnitude = intent.getFloatExtra(Constants.EXTRA_ACCEL_MAGNITUDE, 0f)
+                        gyroMagnitude  = intent.getFloatExtra(Constants.EXTRA_GYRO_MAGNITUDE, 0f)
                     }
                 }
             }
@@ -151,6 +153,7 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
         val filter = IntentFilter().apply {
             addAction(Constants.ACTION_STATUS_UPDATE)
             addAction(Constants.ACTION_ALERT_FIRED)
+            addAction(Constants.ACTION_SENSOR_VALUES)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -180,6 +183,24 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(bottom = 2.dp)
         )
         Text(text = "Statut : $status", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        // Valeurs capteur en temps réel (visibles uniquement si le service est actif)
+        if (accelMagnitude > 0f || gyroMagnitude > 0f) {
+            Spacer(Modifier.height(6.dp))
+            SensorGauge(
+                label     = "Accéléromètre",
+                value     = accelMagnitude,
+                threshold = Constants.THRESHOLD_MS2,
+                unit      = "m/s²"
+            )
+            Spacer(Modifier.height(4.dp))
+            SensorGauge(
+                label     = "Gyroscope",
+                value     = gyroMagnitude,
+                threshold = Constants.ROTATION_THRESHOLD_RADS,
+                unit      = "rad/s"
+            )
+        }
 
         Spacer(Modifier.height(4.dp))
 
@@ -232,7 +253,6 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f)
             ) { Text("Sauvegarder") }
 
-            // Test SMS — le send est en simulation dans MessageSender pour l'instant
             TextButton(
                 onClick = {
                     saveConfig()
@@ -296,14 +316,63 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
 
 // -------------------------------------------------------------------------
 // Vérifie si FoalingDetectionService est en cours d'exécution.
-// getRunningServices est déprécié depuis API 26 mais continue de fonctionner
-// pour les services de la propre application.
 // -------------------------------------------------------------------------
 @Suppress("DEPRECATION")
 private fun isServiceRunning(context: Context): Boolean {
     val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
     return manager.getRunningServices(Int.MAX_VALUE)
         .any { it.service.className == FoalingDetectionService::class.java.name }
+}
+
+// -------------------------------------------------------------------------
+// Composant : jauge capteur temps réel
+// -------------------------------------------------------------------------
+
+@Composable
+private fun SensorGauge(
+    label: String,
+    value: Float,
+    threshold: Float,
+    unit: String
+) {
+    val ratio = (value / threshold).coerceIn(0f, 1f)
+    val isOver = value >= threshold
+    val barColor = when {
+        ratio > 0.85f -> Color(0xFFD32F2F)
+        ratio > 0.5f  -> Color(0xFFF57C00)
+        else          -> Color(0xFF388E3C)
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(text = label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = "%.2f / %.1f %s".format(value, threshold, unit),
+                fontSize = 12.sp,
+                fontWeight = if (isOver) FontWeight.Bold else FontWeight.Normal,
+                color = if (isOver) Color(0xFFD32F2F) else MaterialTheme.colorScheme.onSurface
+            )
+        }
+        Spacer(Modifier.height(2.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(ratio)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(barColor)
+            )
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -328,7 +397,6 @@ private fun AlertEventRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Badge type
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
@@ -338,7 +406,6 @@ private fun AlertEventRow(
             Text(text = badgeLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
 
-        // Infos
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = dateFormat.format(Date(event.timestamp)),

@@ -22,7 +22,8 @@ import kotlin.math.sqrt
  */
 class AccelerometerHandler(
     private val context: Context,
-    private val onAlertTriggered: (timestampMs: Long) -> Unit
+    private val onAlertTriggered: (timestampMs: Long) -> Unit,
+    private val onValueUpdate: (magnitude: Float) -> Unit = {}
 ) : SensorEventListener {
 
     private val sensorManager =
@@ -62,13 +63,13 @@ class AccelerometerHandler(
             Constants.SENSOR_SAMPLING_US,
             sensorHandler
         )
-        Log.i(Constants.TAG, "AccelerometerHandler démarré (${Constants.SENSOR_SAMPLING_US / 1000} ms)")
+        AppLogger.i(Constants.TAG, "AccelerometerHandler démarré (${Constants.SENSOR_SAMPLING_US / 1000} ms)")
     }
 
     fun stop() {
         sensorManager.unregisterListener(this)
         handlerThread.quitSafely()
-        Log.i(Constants.TAG, "AccelerometerHandler arrêté")
+        AppLogger.i(Constants.TAG, "AccelerometerHandler arrêté")
     }
 
     // -------------------------------------------------------------------------
@@ -84,10 +85,12 @@ class AccelerometerHandler(
         val magnitude = sqrt(ax * ax + ay * ay + az * az)
         val now = System.currentTimeMillis()
 
+        onValueUpdate(magnitude)
+
         // Détection rising edge : passage de sous → sur le seuil
         if (previousMagnitude < Constants.THRESHOLD_MS2 && magnitude >= Constants.THRESHOLD_MS2) {
             crossingTimestamps.addLast(now)
-            logEvent("Dépassement #${crossingTimestamps.size} — magnitude=%.2f m/s²".format(magnitude))
+            AppLogger.d(Constants.TAG, "Dépassement #${crossingTimestamps.size} — magnitude=%.2f m/s²".format(magnitude))
         }
         previousMagnitude = magnitude
 
@@ -119,15 +122,13 @@ class AccelerometerHandler(
 
         if (elapsed < Constants.COOLDOWN_MS) {
             val remainingMin = (Constants.COOLDOWN_MS - elapsed) / 60_000
-            logEvent("Alerte supprimée — cooldown actif (encore ${remainingMin} min)")
-            Log.i(Constants.TAG, "Alerte supprimée par cooldown (encore ${remainingMin} min)")
+            AppLogger.i(Constants.TAG, "Alerte supprimée — cooldown actif (encore ${remainingMin} min)")
             return
         }
 
         // Enregistre l'heure de l'alerte avant d'appeler le callback
         prefs.edit().putLong(Constants.PREF_LAST_ALERT_TIME, now).apply()
-        logEvent("ALERTE déclenchée à $now")
-        Log.i(Constants.TAG, "ALERTE déclenchée !")
+        AppLogger.i(Constants.TAG, "ALERTE mouvement déclenchée !")
         onAlertTriggered(now)
     }
 

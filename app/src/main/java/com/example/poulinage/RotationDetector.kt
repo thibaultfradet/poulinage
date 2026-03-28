@@ -23,7 +23,8 @@ import kotlin.math.sqrt
  */
 class RotationDetector(
     private val context: Context,
-    private val onAlertTriggered: (timestampMs: Long, detail: String) -> Unit
+    private val onAlertTriggered: (timestampMs: Long, detail: String) -> Unit,
+    private val onValueUpdate: (magnitude: Float) -> Unit = {}
 ) : SensorEventListener {
 
     private val sensorManager =
@@ -60,7 +61,7 @@ class RotationDetector(
             Constants.SENSOR_SAMPLING_US,
             gyroHandler
         )
-        Log.i(Constants.TAG, "RotationDetector démarré (seuil=${Constants.ROTATION_THRESHOLD_RADS} rad/s)")
+        AppLogger.i(Constants.TAG, "RotationDetector démarré (seuil=${Constants.ROTATION_THRESHOLD_RADS} rad/s)")
     }
 
     fun stop() {
@@ -82,12 +83,14 @@ class RotationDetector(
         val magnitude = sqrt(wx * wx + wy * wy + wz * wz)
         val now = System.currentTimeMillis()
 
+        onValueUpdate(magnitude)
+
         // Rising edge : passage de sous → sur le seuil de rotation
         if (previousMagnitude < Constants.ROTATION_THRESHOLD_RADS &&
             magnitude >= Constants.ROTATION_THRESHOLD_RADS
         ) {
             crossingTimestamps.addLast(now)
-            Log.d(Constants.TAG, "Rotation #${crossingTimestamps.size} — vitesse=%.2f rad/s".format(magnitude))
+            AppLogger.d(Constants.TAG, "Rotation #${crossingTimestamps.size} — vitesse=%.2f rad/s".format(magnitude))
         }
         previousMagnitude = magnitude
 
@@ -118,12 +121,12 @@ class RotationDetector(
 
         if (elapsed < Constants.COOLDOWN_MS) {
             val remainingMin = (Constants.COOLDOWN_MS - elapsed) / 60_000
-            Log.i(Constants.TAG, "[Rotation] Alerte supprimée — cooldown actif (encore ${remainingMin} min)")
+            AppLogger.i(Constants.TAG, "[Rotation] Alerte supprimée — cooldown actif (encore ${remainingMin} min)")
             return
         }
 
         prefs.edit().putLong(Constants.PREF_LAST_ALERT_TIME, now).apply()
-        Log.i(Constants.TAG, "[Rotation] ALERTE déclenchée — $detail")
+        AppLogger.i(Constants.TAG, "[Rotation] ALERTE déclenchée — $detail")
         onAlertTriggered(now, detail)
     }
 }

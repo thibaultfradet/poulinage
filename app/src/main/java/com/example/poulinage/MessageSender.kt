@@ -81,7 +81,7 @@ object MessageSender {
         */
 
         // -- Simulation (à supprimer lors du décommentage ci-dessus) ----------
-        Log.i(Constants.TAG, "[SIMULATION SMS → $phoneNumber]\n$message")
+        AppLogger.i(Constants.TAG, "[SIMULATION SMS → $phoneNumber] $message")
         onResult?.invoke(true, null)
         // ----------------------------------------------------------------------
     }

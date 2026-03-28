@@ -38,6 +38,11 @@ class FoalingDetectionService : Service() {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
 
+    // Dernières valeurs capteur — mises à jour depuis les HandlerThreads des détecteurs
+    @Volatile private var lastAccelMagnitude = 0f
+    @Volatile private var lastGyroMagnitude  = 0f
+    @Volatile private var lastSensorBroadcastMs = 0L
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
@@ -48,7 +53,7 @@ class FoalingDetectionService : Service() {
         startForeground(Constants.NOTIFICATION_ID, buildNotification("Surveillance en cours..."))
         acquireWakeLock()
         startMonitoring()
-        Log.i(Constants.TAG, "Service démarré")
+        AppLogger.i(Constants.TAG, "Service démarré")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -60,7 +65,7 @@ class FoalingDetectionService : Service() {
         stopMonitoring()
         releaseWakeLock()
         broadcastStatus("Surveillance arrêtée")
-        Log.i(Constants.TAG, "Service arrêté")
+        AppLogger.i(Constants.TAG, "Service arrêté")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -133,8 +138,12 @@ class FoalingDetectionService : Service() {
                 handleAlert(
                     timestampMs = timestampMs,
                     alertType   = Constants.ALERT_TYPE_MOVEMENT,
-                    detail      = "Mouvement fort détecté"
+                    detail      = "magnitude=%.1f m/s²".format(lastAccelMagnitude)
                 )
+            },
+            onValueUpdate = { magnitude ->
+                lastAccelMagnitude = magnitude
+                throttledSensorBroadcast()
             }
         )
         accelerometerHandler?.start()
@@ -148,6 +157,10 @@ class FoalingDetectionService : Service() {
                     alertType   = Constants.ALERT_TYPE_ROTATION,
                     detail      = detail
                 )
+            },
+            onValueUpdate = { magnitude ->
+                lastGyroMagnitude = magnitude
+                throttledSensorBroadcast()
             }
         )
         rotationDetector?.start()
@@ -170,7 +183,7 @@ class FoalingDetectionService : Service() {
 
     private fun handleAlert(timestampMs: Long, alertType: String, detail: String) {
         val time = timeFormat.format(Date(timestampMs))
-        Log.i(Constants.TAG, "Alerte $alertType à $time — $detail")
+        AppLogger.i(Constants.TAG, "Alerte $alertType à $time — $detail")
 
         // 1. Enregistrement dans l'historique persistant
         AlertHistory.save(
@@ -190,10 +203,11 @@ class FoalingDetectionService : Service() {
             detail      = detail,
             onResult    = { success, error ->
                 if (success) {
+                    AppLogger.i(Constants.TAG, "SMS envoyé à $time")
                     updateNotification("SMS envoyé ($time) — surveillance active")
                     broadcastStatus("SMS envoyé à $time")
                 } else {
-                    Log.e(Constants.TAG, "Erreur SMS : $error")
+                    AppLogger.e(Constants.TAG, "Erreur SMS : $error")
                     updateNotification("Erreur SMS — surveillance active")
                     broadcastStatus("Erreur SMS : $error")
                 }
@@ -204,6 +218,22 @@ class FoalingDetectionService : Service() {
     // -------------------------------------------------------------------------
     // Broadcasts vers MainActivity
     // -------------------------------------------------------------------------
+
+    /**
+     * Broadcast les valeurs capteur brutes à l'UI, au plus toutes les
+     * [Constants.SENSOR_BROADCAST_INTERVAL_MS] ms pour ne pas saturer le main thread.
+     * Appelé depuis les HandlerThreads des détecteurs.
+     */
+    private fun throttledSensorBroadcast() {
+        val now = System.currentTimeMillis()
+        if (now - lastSensorBroadcastMs < Constants.SENSOR_BROADCAST_INTERVAL_MS) return
+        lastSensorBroadcastMs = now
+        sendBroadcast(Intent(Constants.ACTION_SENSOR_VALUES).apply {
+            putExtra(Constants.EXTRA_ACCEL_MAGNITUDE, lastAccelMagnitude)
+            putExtra(Constants.EXTRA_GYRO_MAGNITUDE, lastGyroMagnitude)
+            setPackage(packageName)
+        })
+    }
 
     private fun broadcastStatus(message: String) {
         sendBroadcast(Intent(Constants.ACTION_STATUS_UPDATE).apply {
