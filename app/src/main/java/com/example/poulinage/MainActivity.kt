@@ -113,21 +113,30 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     }
 
     // -------------------------------------------------------------------------
-    // Permission notification (runtime sur API 33+)
+    // Permissions runtime
     // -------------------------------------------------------------------------
-    val notifPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) {}
+    val multiPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        results.forEach { (perm, granted) ->
+            if (!granted) AppLogger.w(Constants.TAG, "Permission refusée : $perm")
+        }
+    }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    context, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
+        val needed = mutableListOf<String>()
+        // SEND_SMS — dangerous permission, requise sur toutes les versions
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.SEND_SMS)
         }
+        // POST_NOTIFICATIONS — requise sur API 33+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (needed.isNotEmpty()) multiPermLauncher.launch(needed.toTypedArray())
     }
 
     // -------------------------------------------------------------------------

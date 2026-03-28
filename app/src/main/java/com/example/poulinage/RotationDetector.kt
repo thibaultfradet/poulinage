@@ -7,19 +7,22 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.HandlerThread
-import android.util.Log
 import kotlin.math.sqrt
 
 /**
  * Détecte les rotations anormales via le gyroscope.
  *
- * Le gyroscope mesure la vitesse angulaire (rad/s) sur chaque axe.
- * Au repos ou lors d'une marche normale : < 1 rad/s.
- * Lors d'un roulement ou retournement (comme une jument qui se roule) :
- * magnitude > [Constants.ROTATION_THRESHOLD_RADS] de façon répétée.
+ * Algorithme : comptage d'échantillons dans une fenêtre glissante.
+ * Chaque sample dont la magnitude dépasse [Constants.ROTATION_THRESHOLD_RADS]
+ * est horodaté et ajouté à la file. Si [Constants.MIN_ROTATION_SAMPLES]
+ * échantillons sont présents dans la fenêtre de [Constants.WINDOW_SIZE_MS] ms,
+ * l'alerte est déclenchée.
  *
- * Même algorithme que [AccelerometerHandler] : rising-edge dans une
- * fenêtre glissante, avec cooldown partagé via SharedPreferences.
+ * Pourquoi pas des rising-edges ?
+ * Une rotation soutenue (ex: tourner le téléphone d'un geste) reste au-dessus
+ * du seuil en continu — elle ne génère qu'un seul rising-edge et ne déclenche
+ * jamais avec l'ancien algorithme. Compter les échantillons détecte à la fois
+ * les rotations brèves répétées ET les rotations soutenues.
  */
 class RotationDetector(
     private val context: Context,
@@ -36,9 +39,8 @@ class RotationDetector(
     private val handlerThread = HandlerThread("GyroHandlerThread")
     private var gyroHandler: Handler? = null
 
-    // État de l'algorithme de détection
-    private var previousMagnitude = 0f
-    private val crossingTimestamps = ArrayDeque<Long>()
+    // Horodatages des échantillons au-dessus du seuil dans la fenêtre courante
+    private val samplesAboveThreshold = ArrayDeque<Long>()
 
     private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -50,7 +52,7 @@ class RotationDetector(
 
     fun start() {
         if (gyroscope == null) {
-            Log.w(Constants.TAG, "Pas de gyroscope sur cet appareil — détection rotation désactivée")
+            AppLogger.w(Constants.TAG, "Pas de gyroscope — détection rotation désactivée")
             return
         }
         handlerThread.start()
@@ -61,13 +63,13 @@ class RotationDetector(
             Constants.SENSOR_SAMPLING_US,
             gyroHandler
         )
-        AppLogger.i(Constants.TAG, "RotationDetector démarré (seuil=${Constants.ROTATION_THRESHOLD_RADS} rad/s)")
+        AppLogger.i(Constants.TAG, "RotationDetector démarré (seuil=${Constants.ROTATION_THRESHOLD_RADS} rad/s, min=${Constants.MIN_ROTATION_SAMPLES} samples)")
     }
 
     fun stop() {
         sensorManager.unregisterListener(this)
         handlerThread.quitSafely()
-        Log.i(Constants.TAG, "RotationDetector arrêté")
+        AppLogger.i(Constants.TAG, "RotationDetector arrêté")
     }
 
     // -------------------------------------------------------------------------
@@ -75,44 +77,38 @@ class RotationDetector(
     // -------------------------------------------------------------------------
 
     override fun onSensorChanged(event: SensorEvent) {
-        val wx = event.values[0]  // vitesse angulaire axe X (rad/s)
-        val wy = event.values[1]  // vitesse angulaire axe Y (rad/s)
-        val wz = event.values[2]  // vitesse angulaire axe Z (rad/s)
-
-        // Magnitude de la vitesse angulaire totale
+        val wx = event.values[0]
+        val wy = event.values[1]
+        val wz = event.values[2]
         val magnitude = sqrt(wx * wx + wy * wy + wz * wz)
         val now = System.currentTimeMillis()
 
         onValueUpdate(magnitude)
 
-        // Rising edge : passage de sous → sur le seuil de rotation
-        if (previousMagnitude < Constants.ROTATION_THRESHOLD_RADS &&
-            magnitude >= Constants.ROTATION_THRESHOLD_RADS
-        ) {
-            crossingTimestamps.addLast(now)
-            AppLogger.d(Constants.TAG, "Rotation #${crossingTimestamps.size} — vitesse=%.2f rad/s".format(magnitude))
-        }
-        previousMagnitude = magnitude
-
-        // Supprimer les événements hors fenêtre
-        while (crossingTimestamps.isNotEmpty() &&
-            (now - crossingTimestamps.first()) > Constants.WINDOW_SIZE_MS
-        ) {
-            crossingTimestamps.removeFirst()
+        // Ajouter cet échantillon si au-dessus du seuil
+        if (magnitude >= Constants.ROTATION_THRESHOLD_RADS) {
+            samplesAboveThreshold.addLast(now)
         }
 
-        // Déclenchement si seuil de répétition atteint
-        if (crossingTimestamps.size >= Constants.MIN_ROTATION_CROSSINGS) {
-            val peakMagnitude = magnitude
-            crossingTimestamps.clear()
-            checkCooldownAndDispatch(now, "vitesse=%.2f rad/s".format(peakMagnitude))
+        // Supprimer les échantillons hors de la fenêtre glissante
+        while (samplesAboveThreshold.isNotEmpty() &&
+            (now - samplesAboveThreshold.first()) > Constants.WINDOW_SIZE_MS
+        ) {
+            samplesAboveThreshold.removeFirst()
+        }
+
+        // Déclencher si assez d'échantillons accumulés
+        if (samplesAboveThreshold.size >= Constants.MIN_ROTATION_SAMPLES) {
+            val peak = magnitude
+            samplesAboveThreshold.clear()
+            checkCooldownAndDispatch(now, "vitesse=%.2f rad/s".format(peak))
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
 
     // -------------------------------------------------------------------------
-    // Cooldown (partagé avec AccelerometerHandler via la même clé prefs)
+    // Cooldown partagé avec AccelerometerHandler
     // -------------------------------------------------------------------------
 
     private fun checkCooldownAndDispatch(now: Long, detail: String) {

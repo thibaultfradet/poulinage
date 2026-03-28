@@ -26,8 +26,8 @@ object Constants {
     // Détection mouvement (accéléromètre)
     // -------------------------------------------------------------------------
 
-    /** Seuil : 2.5g en m/s² — mouvement fort */
-    const val THRESHOLD_MS2      = 2.5f * 9.81f   // ≈ 24.5 m/s²
+    /** Seuil : 1.8g en m/s² — mouvement fort (abaissé pour plus de sensibilité) */
+    const val THRESHOLD_MS2      = 1.8f * 9.81f   // ≈ 17.7 m/s²
 
     /** Fenêtre glissante commune aux deux détecteurs */
     const val WINDOW_SIZE_MS     = 10_000L
@@ -53,10 +53,12 @@ object Constants {
     const val ROTATION_THRESHOLD_RADS  = 2.0f
 
     /**
-     * 4 dépassements en 10 secondes suffisent pour la rotation
-     * (moins que pour l'accéléromètre car la rotation est plus spécifique).
+     * Nombre d'échantillons consécutifs au-dessus du seuil nécessaires pour déclencher.
+     * À 20 Hz, 12 échantillons = 0.6 s de rotation soutenue.
+     * Compter des échantillons (pas des rising-edges) permet de détecter
+     * les rotations soutenues qui ne génèrent qu'un seul crossing.
      */
-    const val MIN_ROTATION_CROSSINGS   = 4
+    const val MIN_ROTATION_SAMPLES     = 12
 
     // -------------------------------------------------------------------------
     // Types d'alerte
