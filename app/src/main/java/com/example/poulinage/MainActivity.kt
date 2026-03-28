@@ -15,7 +15,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -23,7 +25,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -39,15 +43,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -81,36 +87,27 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     // État de l'UI
     // -------------------------------------------------------------------------
     var status by remember { mutableStateOf("Inactif") }
-    var lastAlert by remember { mutableStateOf("Aucune alerte") }
+    var phoneNumber by remember { mutableStateOf(prefs.getString(Constants.PREF_PHONE_NUMBER, "") ?: "") }
 
-    // Champs SMTP — initialisés depuis SharedPreferences
-    var smtpHost     by remember { mutableStateOf(prefs.getString(Constants.PREF_SMTP_HOST, "smtp.gmail.com") ?: "smtp.gmail.com") }
-    var smtpPort     by remember { mutableStateOf(prefs.getString(Constants.PREF_SMTP_PORT, "587") ?: "587") }
-    var smtpUser     by remember { mutableStateOf(prefs.getString(Constants.PREF_SMTP_USER, "") ?: "") }
-    var smtpPassword by remember { mutableStateOf(prefs.getString(Constants.PREF_SMTP_PASSWORD, "") ?: "") }
-    var emailDest    by remember { mutableStateOf(prefs.getString(Constants.PREF_EMAIL_DEST, "") ?: "") }
+    // Historique des alertes — chargé depuis SharedPreferences, mis à jour en temps réel
+    val historyEvents = remember { mutableStateListOf<AlertHistory.Event>() }
 
-    // -------------------------------------------------------------------------
-    // Helper — sauvegarde dans SharedPreferences
-    // -------------------------------------------------------------------------
+    fun reloadHistory() {
+        historyEvents.clear()
+        historyEvents.addAll(AlertHistory.load(context))
+    }
+
     fun saveConfig() {
         prefs.edit()
-            .putString(Constants.PREF_SMTP_HOST, smtpHost.trim())
-            .putString(Constants.PREF_SMTP_PORT, smtpPort.trim())
-            .putString(Constants.PREF_SMTP_USER, smtpUser.trim())
-            .putString(Constants.PREF_SMTP_PASSWORD, smtpPassword)
-            .putString(Constants.PREF_EMAIL_DEST, emailDest.trim())
+            .putString(Constants.PREF_PHONE_NUMBER, phoneNumber.trim())
             .apply()
     }
 
     // -------------------------------------------------------------------------
-    // Chargement initial : heure de la dernière alerte
+    // Chargement initial
     // -------------------------------------------------------------------------
     LaunchedEffect(Unit) {
-        val lastAlertMs = prefs.getLong(Constants.PREF_LAST_ALERT_TIME, 0L)
-        if (lastAlertMs > 0) {
-            lastAlert = dateFormat.format(Date(lastAlertMs))
-        }
+        reloadHistory()
     }
 
     // -------------------------------------------------------------------------
@@ -118,7 +115,7 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     // -------------------------------------------------------------------------
     val notifPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* accordée ou refusée — la notification s'affiche si accordée */ }
+    ) {}
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -132,7 +129,7 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     }
 
     // -------------------------------------------------------------------------
-    // BroadcastReceiver — mises à jour du service foreground
+    // BroadcastReceiver — mises à jour du service
     // -------------------------------------------------------------------------
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
@@ -142,8 +139,8 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
                         status = intent.getStringExtra(Constants.EXTRA_STATUS_MESSAGE) ?: status
                     }
                     Constants.ACTION_ALERT_FIRED -> {
-                        val ts = intent.getLongExtra(Constants.EXTRA_ALERT_TIMESTAMP, 0L)
-                        if (ts > 0) lastAlert = dateFormat.format(Date(ts))
+                        // Rechargement depuis SharedPreferences pour garder l'UI en sync
+                        reloadHistory()
                     }
                 }
             }
@@ -152,7 +149,6 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
             addAction(Constants.ACTION_STATUS_UPDATE)
             addAction(Constants.ACTION_ALERT_FIRED)
         }
-        // RECEIVER_NOT_EXPORTED : seule notre appli peut envoyer ces broadcasts
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
         } else {
@@ -172,24 +168,19 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+
+        // ---- Titre ----------------------------------------------------------
         Text(
             text = "Détection Poulinage",
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 4.dp)
+            modifier = Modifier.padding(bottom = 2.dp)
         )
-
-        Text(text = "Statut : $status", fontSize = 14.sp)
-        Text(
-            text = "Dernière alerte : $lastAlert",
-            fontSize = 14.sp,
-            color = if (lastAlert == "Aucune alerte") MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.error
-        )
+        Text(text = "Statut : $status", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Spacer(Modifier.height(4.dp))
 
-        // Boutons Démarrer / Arrêter
+        // ---- Boutons Démarrer / Arrêter ------------------------------------
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
@@ -217,85 +208,133 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
             ) { Text("Arrêter") }
         }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
 
-        Text(
-            text = "Configuration SMTP",
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold
-        )
+        // ---- Configuration messagerie --------------------------------------
+        Text(text = "Configuration messagerie", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
 
         OutlinedTextField(
-            value = smtpHost,
-            onValueChange = { smtpHost = it },
-            label = { Text("Serveur SMTP (ex: smtp.gmail.com)") },
+            value = phoneNumber,
+            onValueChange = { phoneNumber = it },
+            label = { Text("Numéro de téléphone destinataire") },
+            placeholder = { Text("ex: +33612345678") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
             modifier = Modifier.fillMaxWidth()
         )
 
-        OutlinedTextField(
-            value = smtpPort,
-            onValueChange = { smtpPort = it },
-            label = { Text("Port (ex: 587)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth()
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { saveConfig(); status = "Configuration sauvegardée" },
+                modifier = Modifier.weight(1f)
+            ) { Text("Sauvegarder") }
 
-        OutlinedTextField(
-            value = smtpUser,
-            onValueChange = { smtpUser = it },
-            label = { Text("Email expéditeur") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        OutlinedTextField(
-            value = smtpPassword,
-            onValueChange = { smtpPassword = it },
-            label = { Text("Mot de passe (App Password Gmail)") },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        OutlinedTextField(
-            value = emailDest,
-            onValueChange = { emailDest = it },
-            label = { Text("Email destinataire") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        OutlinedButton(
-            onClick = { saveConfig(); status = "Configuration sauvegardée" },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Sauvegarder la configuration") }
-
-        // Test email — le callback SMTP est sur un thread background,
-        // on repasse sur le main thread via Handler avant de toucher l'état Compose
-        TextButton(
-            onClick = {
-                saveConfig()
-                status = "Envoi email test..."
-                EmailSender.sendAlertAsync(
-                    context = context,
-                    timestampMs = System.currentTimeMillis(),
-                    onResult = { success, error ->
-                        mainHandler.post {
-                            status = if (success) "Email test envoyé !"
-                                     else "Erreur : $error"
+            // Test SMS — le send est en simulation dans MessageSender pour l'instant
+            TextButton(
+                onClick = {
+                    saveConfig()
+                    status = "Envoi SMS test..."
+                    MessageSender.sendAlertSms(
+                        context     = context,
+                        timestampMs = System.currentTimeMillis(),
+                        alertType   = Constants.ALERT_TYPE_MOVEMENT,
+                        detail      = "Test manuel depuis l'app",
+                        onResult    = { success, error ->
+                            mainHandler.post {
+                                status = if (success) "SMS test envoyé (simulation)"
+                                         else "Erreur : $error"
+                            }
                         }
-                    }
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Tester l'envoi email") }
+                    )
+                },
+                modifier = Modifier.weight(1f)
+            ) { Text("Tester SMS") }
+        }
 
-        Spacer(Modifier.height(16.dp))
+        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+        // ---- Historique des alertes ----------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Historique (${historyEvents.size})",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (historyEvents.isNotEmpty()) {
+                TextButton(onClick = {
+                    AlertHistory.clear(context)
+                    reloadHistory()
+                }) {
+                    Text("Vider", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                }
+            }
+        }
+
+        if (historyEvents.isEmpty()) {
+            Text(
+                text = "Aucune alerte enregistrée.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else {
+            historyEvents.forEach { event ->
+                AlertEventRow(event = event, dateFormat = dateFormat)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+// -------------------------------------------------------------------------
+// Composant : une ligne d'historique
+// -------------------------------------------------------------------------
+
+@Composable
+private fun AlertEventRow(
+    event: AlertHistory.Event,
+    dateFormat: SimpleDateFormat
+) {
+    val isMovement = event.type == Constants.ALERT_TYPE_MOVEMENT
+    val badgeColor = if (isMovement) Color(0xFF1565C0) else Color(0xFF6A1B9A)
+    val badgeLabel = if (isMovement) "MOUVEMENT" else "ROTATION"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Badge type
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(badgeColor)
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Text(text = badgeLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // Infos
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = dateFormat.format(Date(event.timestamp)),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = event.detail,
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

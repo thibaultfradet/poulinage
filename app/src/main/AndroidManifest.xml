@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Réseau pour l'envoi SMTP -->
+    <!-- Réseau (conservé pour EmailSender, utilisations futures) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- WakeLock : maintient le CPU actif même écran éteint -->
@@ -11,15 +11,21 @@
     <!-- Foreground Service (obligatoire API 28+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
-    <!-- Foreground Service type dataSync (réseau SMTP) — obligatoire API 34+ -->
+    <!-- Foreground Service type dataSync — obligatoire API 34+ -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <!-- Notifications (permission runtime API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Accéléromètre déclaré comme optionnel pour ne pas bloquer l'installation -->
+    <!-- Envoi SMS — décommenter dans MessageSender.kt pour l'activer -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- Capteurs déclarés comme optionnels pour ne pas bloquer l'installation -->
     <uses-feature
         android:name="android.hardware.sensor.accelerometer"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.sensor.gyroscope"
         android:required="false" />
 
     <application
@@ -43,7 +49,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Service foreground de détection — dataSync car accès réseau SMTP -->
+        <!-- Service foreground de détection -->
         <service
             android:name=".FoalingDetectionService"
             android:enabled="true"

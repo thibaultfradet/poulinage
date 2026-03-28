@@ -16,13 +16,17 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Service foreground qui surveille l'accéléromètre en permanence.
+ * Service foreground de surveillance — actif même écran éteint.
  *
- * - Se lance en premier plan (notification visible) pour survivre aux restrictions API 26+
- * - Acquiert un PARTIAL_WAKE_LOCK pour maintenir le CPU actif écran éteint
- * - Délègue la détection à [AccelerometerHandler]
- * - Envoie l'email via [EmailSender] lors d'une alerte
- * - Communique les mises à jour à [MainActivity] via des broadcasts
+ * Démarre deux détecteurs en parallèle :
+ *   - [AccelerometerHandler]  : grands mouvements (chocs, agitation)
+ *   - [RotationDetector]      : rotations répétées (se roule, se retourne)
+ *
+ * Sur alerte :
+ *   1. Enregistre l'événement dans [AlertHistory]
+ *   2. Envoie un SMS via [MessageSender]
+ *   3. Met à jour la notification foreground
+ *   4. Broadcast l'alerte vers [MainActivity]
  *
  * Retourne START_STICKY : le système redémarre le service s'il est tué.
  */
@@ -30,6 +34,7 @@ class FoalingDetectionService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var accelerometerHandler: AccelerometerHandler? = null
+    private var rotationDetector: RotationDetector? = null
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
 
@@ -40,7 +45,6 @@ class FoalingDetectionService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // startForeground DOIT être appelé immédiatement dans onCreate
         startForeground(Constants.NOTIFICATION_ID, buildNotification("Surveillance en cours..."))
         acquireWakeLock()
         startMonitoring()
@@ -48,7 +52,6 @@ class FoalingDetectionService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // START_STICKY : redémarrage automatique par le système si le service est tué
         return START_STICKY
     }
 
@@ -60,7 +63,6 @@ class FoalingDetectionService : Service() {
         Log.i(Constants.TAG, "Service arrêté")
     }
 
-    // Non lié à une Activity, pas de binding
     override fun onBind(intent: Intent?): IBinder? = null
 
     // -------------------------------------------------------------------------
@@ -71,7 +73,7 @@ class FoalingDetectionService : Service() {
         val channel = NotificationChannel(
             Constants.NOTIFICATION_CHANNEL_ID,
             getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_LOW  // IMPORTANCE_LOW = pas de son, discret
+            NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Surveillance continue des mouvements de la jument"
             setShowBadge(false)
@@ -81,7 +83,6 @@ class FoalingDetectionService : Service() {
     }
 
     private fun buildNotification(contentText: String): Notification {
-        // Appuyer sur la notification rouvre l'activité principale
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -92,7 +93,7 @@ class FoalingDetectionService : Service() {
             .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)   // ne peut pas être balayée par l'utilisateur
+            .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
@@ -109,19 +110,14 @@ class FoalingDetectionService : Service() {
     private fun acquireWakeLock() {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,  // CPU actif, écran peut s'éteindre
+            PowerManager.PARTIAL_WAKE_LOCK,
             "poulinage:detection"
         ).also { it.acquire() }
         Log.i(Constants.TAG, "WakeLock acquis")
     }
 
     private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-                Log.i(Constants.TAG, "WakeLock relâché")
-            }
-        }
+        wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }
 
@@ -130,43 +126,83 @@ class FoalingDetectionService : Service() {
     // -------------------------------------------------------------------------
 
     private fun startMonitoring() {
+        // Détection grands mouvements (accéléromètre)
         accelerometerHandler = AccelerometerHandler(
             context = this,
-            onAlertTriggered = { timestampMs -> handleAlert(timestampMs) }
+            onAlertTriggered = { timestampMs ->
+                handleAlert(
+                    timestampMs = timestampMs,
+                    alertType   = Constants.ALERT_TYPE_MOVEMENT,
+                    detail      = "Mouvement fort détecté"
+                )
+            }
         )
         accelerometerHandler?.start()
-        broadcastStatus("Surveillance active")
+
+        // Détection rotations (gyroscope) — ignoré silencieusement si absent
+        rotationDetector = RotationDetector(
+            context = this,
+            onAlertTriggered = { timestampMs, detail ->
+                handleAlert(
+                    timestampMs = timestampMs,
+                    alertType   = Constants.ALERT_TYPE_ROTATION,
+                    detail      = detail
+                )
+            }
+        )
+        rotationDetector?.start()
+
+        val gyroInfo = if (rotationDetector?.isAvailable == true) "gyroscope actif" else "gyroscope absent"
+        broadcastStatus("Surveillance active ($gyroInfo)")
+        Log.i(Constants.TAG, "Surveillance démarrée — accéléromètre + $gyroInfo")
     }
 
     private fun stopMonitoring() {
         accelerometerHandler?.stop()
         accelerometerHandler = null
+        rotationDetector?.stop()
+        rotationDetector = null
     }
 
-    private fun handleAlert(timestampMs: Long) {
-        val time = timeFormat.format(Date(timestampMs))
-        Log.i(Constants.TAG, "Alerte détectée à $time — envoi email")
-        updateNotification("ALERTE à $time — envoi email...")
-        broadcastAlertFired(timestampMs)
+    // -------------------------------------------------------------------------
+    // Gestion d'une alerte (commune aux deux détecteurs)
+    // -------------------------------------------------------------------------
 
-        EmailSender.sendAlertAsync(
+    private fun handleAlert(timestampMs: Long, alertType: String, detail: String) {
+        val time = timeFormat.format(Date(timestampMs))
+        Log.i(Constants.TAG, "Alerte $alertType à $time — $detail")
+
+        // 1. Enregistrement dans l'historique persistant
+        AlertHistory.save(
             context = this,
+            event   = AlertHistory.Event(timestamp = timestampMs, type = alertType, detail = detail)
+        )
+
+        // 2. Mise à jour notification et broadcast vers l'UI
+        updateNotification("ALERTE $alertType à $time")
+        broadcastAlertFired(timestampMs, alertType, detail)
+
+        // 3. Envoi SMS (implementation commentée dans MessageSender)
+        MessageSender.sendAlertSms(
+            context     = this,
             timestampMs = timestampMs,
-            onResult = { success, error ->
+            alertType   = alertType,
+            detail      = detail,
+            onResult    = { success, error ->
                 if (success) {
-                    updateNotification("Email envoyé ($time) — surveillance active")
-                    broadcastStatus("Email envoyé à $time")
+                    updateNotification("SMS envoyé ($time) — surveillance active")
+                    broadcastStatus("SMS envoyé à $time")
                 } else {
-                    Log.e(Constants.TAG, "Erreur envoi email : $error")
-                    updateNotification("Erreur email — surveillance active")
-                    broadcastStatus("Erreur email : $error")
+                    Log.e(Constants.TAG, "Erreur SMS : $error")
+                    updateNotification("Erreur SMS — surveillance active")
+                    broadcastStatus("Erreur SMS : $error")
                 }
             }
         )
     }
 
     // -------------------------------------------------------------------------
-    // Communication avec MainActivity (via broadcasts)
+    // Broadcasts vers MainActivity
     // -------------------------------------------------------------------------
 
     private fun broadcastStatus(message: String) {
@@ -176,9 +212,11 @@ class FoalingDetectionService : Service() {
         })
     }
 
-    private fun broadcastAlertFired(timestampMs: Long) {
+    private fun broadcastAlertFired(timestampMs: Long, alertType: String, detail: String) {
         sendBroadcast(Intent(Constants.ACTION_ALERT_FIRED).apply {
             putExtra(Constants.EXTRA_ALERT_TIMESTAMP, timestampMs)
+            putExtra(Constants.EXTRA_ALERT_TYPE, alertType)
+            putExtra(Constants.EXTRA_ALERT_DETAIL, detail)
             setPackage(packageName)
         })
     }
