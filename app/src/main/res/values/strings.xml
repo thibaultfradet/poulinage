@@ -1,3 +1,16 @@
 <resources>
-    <string name="app_name">Poulinage</string>
+    <string name="app_name">Détection Poulinage</string>
+    <string name="btn_start">Démarrer</string>
+    <string name="btn_stop">Arrêter</string>
+    <string name="btn_save">Sauvegarder</string>
+    <string name="btn_test_email">Tester l\'email</string>
+    <string name="section_smtp">Configuration SMTP</string>
+    <string name="hint_smtp_host">Serveur SMTP (ex: smtp.gmail.com)</string>
+    <string name="hint_smtp_port">Port (ex: 587)</string>
+    <string name="hint_smtp_user">Email expéditeur</string>
+    <string name="hint_smtp_password">Mot de passe (App Password)</string>
+    <string name="hint_email_dest">Email destinataire</string>
+    <string name="status_idle">Inactif</string>
+    <string name="no_alert">Aucune alerte</string>
+    <string name="notification_channel_name">Surveillance poulinage</string>
 </resources>

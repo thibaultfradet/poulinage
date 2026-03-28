@@ -37,6 +37,21 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Required to avoid META-INF conflicts from JavaMail JARs
+    packaging {
+        resources {
+            excludes += listOf(
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt",
+                "META-INF/*.RSA",
+                "META-INF/*.SF",
+                "META-INF/*.DSA"
+            )
+        }
+    }
 }
 
 dependencies {
@@ -49,6 +64,11 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+
+    // JavaMail for Android — SMTP email without opening an email app
+    implementation(libs.android.mail)
+    implementation(libs.android.activation)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

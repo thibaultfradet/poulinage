@@ -19,3 +19,14 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# JavaMail / android-mail
+-keep class com.sun.mail.** { *; }
+-keep class javax.mail.** { *; }
+-keep class javax.activation.** { *; }
+-dontwarn com.sun.mail.**
+-dontwarn javax.mail.**
+-dontwarn javax.activation.**
+
+# Classes de l'application
+-keep class com.example.poulinage.** { *; }
