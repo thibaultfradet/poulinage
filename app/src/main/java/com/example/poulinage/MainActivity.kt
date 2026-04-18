@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Slider
 import androidx.core.content.ContextCompat
 import com.example.poulinage.ui.theme.PoulinageTheme
 import java.text.SimpleDateFormat
@@ -91,6 +92,15 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     var accelMagnitude by remember { mutableStateOf(0f) }
     var gyroMagnitude  by remember { mutableStateOf(0f) }
 
+    // État des seuils dynamiques
+    var accelThreshold by remember { mutableStateOf(prefs.getFloat(Constants.PREF_ACCEL_THRESHOLD, Constants.DEFAULT_ACCEL_THRESHOLD)) }
+    var rotationThreshold by remember { mutableStateOf(prefs.getFloat(Constants.PREF_ROTATION_THRESHOLD, Constants.DEFAULT_ROTATION_THRESHOLD)) }
+    var minCrossings by remember { mutableStateOf(prefs.getInt(Constants.PREF_MIN_CROSSINGS, Constants.DEFAULT_MIN_CROSSINGS)) }
+    var minRotationSamples by remember { mutableStateOf(prefs.getInt(Constants.PREF_MIN_ROTATION_SAMPLES, Constants.DEFAULT_MIN_ROTATION_SAMPLES)) }
+    var windowSize by remember { mutableStateOf(prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS) / 1000L) }  // en secondes
+
+    var showAdvancedSettings by remember { mutableStateOf(false) }
+
     val historyEvents = remember { mutableStateListOf<AlertHistory.Event>() }
 
     fun reloadHistory() {
@@ -102,6 +112,17 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
         prefs.edit()
             .putString(Constants.PREF_PHONE_NUMBER, phoneNumber.trim())
             .apply()
+    }
+
+    fun saveAdvancedSettings() {
+        prefs.edit()
+            .putFloat(Constants.PREF_ACCEL_THRESHOLD, accelThreshold)
+            .putFloat(Constants.PREF_ROTATION_THRESHOLD, rotationThreshold)
+            .putInt(Constants.PREF_MIN_CROSSINGS, minCrossings)
+            .putInt(Constants.PREF_MIN_ROTATION_SAMPLES, minRotationSamples)
+            .putLong(Constants.PREF_WINDOW_SIZE_MS, windowSize * 1000L)
+            .apply()
+        AppLogger.i(Constants.TAG, "Advanced settings sauvegardés")
     }
 
     // -------------------------------------------------------------------------
@@ -318,7 +339,155 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
 
-        // ---- Historique des alertes ----------------------------------------
+        // ---- Configuration avancée (seuils dynamiques) ----------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Paramètres avancés",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            TextButton(onClick = { showAdvancedSettings = !showAdvancedSettings }) {
+                Text(if (showAdvancedSettings) "Masquer" else "Afficher", fontSize = 12.sp)
+            }
+        }
+
+        if (showAdvancedSettings) {
+            Spacer(Modifier.height(8.dp))
+
+            // ---- Seuil accéléromètre ----
+            Text(
+                text = "Seuil accéléromètre: %.2f m/s² (%.2f g)".format(
+                    accelThreshold,
+                    accelThreshold / 9.81f
+                ),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Slider(
+                value = accelThreshold,
+                onValueChange = { accelThreshold = it },
+                valueRange = 4.9f..24.5f,  // 0.5g à 2.5g
+                modifier = Modifier.fillMaxWidth(),
+                steps = 29  // Plus de précision
+            )
+            Text(
+                text = "Plage: 0.5g (4.9 m/s²) à 2.5g (24.5 m/s²)",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ---- Seuil gyroscope ----
+            Text(
+                text = "Seuil gyroscope: %.2f rad/s (≈%.0f°/s)".format(
+                    rotationThreshold,
+                    rotationThreshold * 57.3f  // conversion rad/s en °/s
+                ),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Slider(
+                value = rotationThreshold,
+                onValueChange = { rotationThreshold = it },
+                valueRange = 0.5f..3.0f,
+                modifier = Modifier.fillMaxWidth(),
+                steps = 24
+            )
+            Text(
+                text = "Plage: 0.5 rad/s (≈29°/s) à 3.0 rad/s (≈172°/s)",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ---- Min crossings accéléromètre ----
+            Text(
+                text = "Min. dépassements accéléromètre: $minCrossings",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Slider(
+                value = minCrossings.toFloat(),
+                onValueChange = { minCrossings = it.toInt() },
+                valueRange = 1f..10f,
+                modifier = Modifier.fillMaxWidth(),
+                steps = 8
+            )
+            Text(
+                text = "Nombre de dépassements du seuil requis dans la fenêtre de temps",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ---- Min rotation samples ----
+            Text(
+                text = "Min. échantillons rotation: $minRotationSamples",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Slider(
+                value = minRotationSamples.toFloat(),
+                onValueChange = { minRotationSamples = it.toInt() },
+                valueRange = 1f..10f,
+                modifier = Modifier.fillMaxWidth(),
+                steps = 8
+            )
+            Text(
+                text = "Nombre d'échantillons au-dessus du seuil requis (à 20 Hz)",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ---- Fenêtre de temps ----
+            Text(
+                text = "Fenêtre de temps: ${windowSize}s",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Slider(
+                value = windowSize.toFloat(),
+                onValueChange = { windowSize = it.toLong() },
+                valueRange = 5f..20f,
+                modifier = Modifier.fillMaxWidth(),
+                steps = 14
+            )
+            Text(
+                text = "Durée sur laquelle les seuils sont accumulés",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(16.dp))
+
+            // Bouton Sauvegarder les paramètres
+            Button(
+                onClick = {
+                    saveAdvancedSettings()
+                    status = "Paramètres avancés sauvegardés (service doit être redémarré)"
+                    // Auto-restart service if running
+                    if (isServiceRunning(context)) {
+                        context.stopService(Intent(context, FoalingDetectionService::class.java))
+                        Handler(Looper.getMainLooper()).postDelayed({
+                            ContextCompat.startForegroundService(
+                                context,
+                                Intent(context, FoalingDetectionService::class.java)
+                            )
+                        }, 500)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Sauvegarder les paramètres")
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,

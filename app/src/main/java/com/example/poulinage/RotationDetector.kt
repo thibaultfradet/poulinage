@@ -12,17 +12,18 @@ import kotlin.math.sqrt
 /**
  * Détecte les rotations anormales via le gyroscope.
  *
- * Algorithme : comptage d'échantillons dans une fenêtre glissante.
- * Chaque sample dont la magnitude dépasse [Constants.ROTATION_THRESHOLD_RADS]
- * est horodaté et ajouté à la file. Si [Constants.MIN_ROTATION_SAMPLES]
- * échantillons sont présents dans la fenêtre de [Constants.WINDOW_SIZE_MS] ms,
- * l'alerte est déclenchée.
+ * Algorithme : comptage d'échantillons dans une fenêtre glissante dynamique.
+ * Chaque sample dont la magnitude dépasse le seuil
+ * est horodaté et ajouté à la file. Si le nombre minimum d'échantillons
+ * sont présents dans la fenêtre, l'alerte est déclenchée.
  *
  * Pourquoi pas des rising-edges ?
  * Une rotation soutenue (ex: tourner le téléphone d'un geste) reste au-dessus
  * du seuil en continu — elle ne génère qu'un seul rising-edge et ne déclenche
  * jamais avec l'ancien algorithme. Compter les échantillons détecte à la fois
  * les rotations brèves répétées ET les rotations soutenues.
+ *
+ * Les seuils sont lus depuis SharedPreferences et peuvent être modifiés dynamiquement.
  */
 class RotationDetector(
     private val context: Context,
@@ -44,6 +45,11 @@ class RotationDetector(
 
     private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
 
+    // Seuils dynamiques chargés depuis SharedPreferences
+    private var rotationThresholdRads = Constants.DEFAULT_ROTATION_THRESHOLD
+    private var windowSizeMs = Constants.DEFAULT_WINDOW_SIZE_MS
+    private var minRotationSamples = Constants.DEFAULT_MIN_ROTATION_SAMPLES
+
     val isAvailable: Boolean get() = gyroscope != null
 
     // -------------------------------------------------------------------------
@@ -55,6 +61,7 @@ class RotationDetector(
             AppLogger.w(Constants.TAG, "Pas de gyroscope — détection rotation désactivée")
             return
         }
+        reloadThresholds()  // Charger les seuils depuis SharedPreferences
         handlerThread.start()
         gyroHandler = Handler(handlerThread.looper)
         sensorManager.registerListener(
@@ -63,13 +70,21 @@ class RotationDetector(
             Constants.SENSOR_SAMPLING_US,
             gyroHandler
         )
-        AppLogger.i(Constants.TAG, "RotationDetector démarré (seuil=${Constants.ROTATION_THRESHOLD_RADS} rad/s, min=${Constants.MIN_ROTATION_SAMPLES} samples)")
+        AppLogger.i(Constants.TAG, "RotationDetector démarré (seuil=$rotationThresholdRads rad/s, min=$minRotationSamples samples)")
     }
 
     fun stop() {
         sensorManager.unregisterListener(this)
         handlerThread.quitSafely()
         AppLogger.i(Constants.TAG, "RotationDetector arrêté")
+    }
+
+    /** Recharge les seuils depuis SharedPreferences */
+    private fun reloadThresholds() {
+        rotationThresholdRads = prefs.getFloat(Constants.PREF_ROTATION_THRESHOLD, Constants.DEFAULT_ROTATION_THRESHOLD)
+        windowSizeMs = prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS)
+        minRotationSamples = prefs.getInt(Constants.PREF_MIN_ROTATION_SAMPLES, Constants.DEFAULT_MIN_ROTATION_SAMPLES)
+        AppLogger.d(Constants.TAG, "Seuils rotation rechargés: seuil=$rotationThresholdRads, window=$windowSizeMs, min=$minRotationSamples")
     }
 
     // -------------------------------------------------------------------------
@@ -85,20 +100,20 @@ class RotationDetector(
 
         onValueUpdate(magnitude)
 
-        // Ajouter cet échantillon si au-dessus du seuil
-        if (magnitude >= Constants.ROTATION_THRESHOLD_RADS) {
+        // Ajouter cet échantillon si au-dessus du seuil dynamique
+        if (magnitude >= rotationThresholdRads) {
             samplesAboveThreshold.addLast(now)
         }
 
-        // Supprimer les échantillons hors de la fenêtre glissante
+        // Supprimer les échantillons hors de la fenêtre glissante dynamique
         while (samplesAboveThreshold.isNotEmpty() &&
-            (now - samplesAboveThreshold.first()) > Constants.WINDOW_SIZE_MS
+            (now - samplesAboveThreshold.first()) > windowSizeMs
         ) {
             samplesAboveThreshold.removeFirst()
         }
 
         // Déclencher si assez d'échantillons accumulés
-        if (samplesAboveThreshold.size >= Constants.MIN_ROTATION_SAMPLES) {
+        if (samplesAboveThreshold.size >= minRotationSamples) {
             val peak = magnitude
             samplesAboveThreshold.clear()
             checkCooldownAndDispatch(now, "vitesse=%.2f rad/s".format(peak))

@@ -13,10 +13,13 @@ import kotlin.math.sqrt
 /**
  * Gère l'accéléromètre et détecte les mouvements anormaux.
  *
- * Algorithme : fenêtre glissante de [Constants.WINDOW_SIZE_MS] ms.
+ * Algorithme : fenêtre glissante dynamique.
  * Chaque fois que la magnitude passe de sous à sur le seuil (rising edge),
- * l'événement est enregistré. Si [Constants.MIN_CROSSINGS] événements
+ * l'événement est enregistré. Si le nombre minimum de dépassements
  * sont comptés dans la fenêtre, [onAlertTriggered] est appelé.
+ *
+ * Les seuils sont lus depuis SharedPreferences et peuvent être modifiés
+ * dynamiquement par l'utilisateur.
  *
  * Le capteur tourne sur un HandlerThread dédié pour ne pas bloquer l'UI.
  */
@@ -40,8 +43,13 @@ class AccelerometerHandler(
     private var previousMagnitude = 0f
     private val crossingTimestamps = ArrayDeque<Long>()
 
-    // SharedPreferences pour lire/écrire le cooldown
+    // SharedPreferences pour lire/écrire le cooldown ET les seuils dynamiques
     private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+
+    // Seuils dynamiques chargés depuis SharedPreferences
+    private var thresholdMs2 = Constants.DEFAULT_ACCEL_THRESHOLD
+    private var windowSizeMs = Constants.DEFAULT_WINDOW_SIZE_MS
+    private var minCrossings = Constants.DEFAULT_MIN_CROSSINGS
 
     // Log circulaire (200 lignes max) pour le débogage
     private val eventLog = mutableListOf<String>()
@@ -55,6 +63,7 @@ class AccelerometerHandler(
             Log.e(Constants.TAG, "Pas d'accéléromètre sur cet appareil")
             return
         }
+        reloadThresholds()  // Charger les seuils depuis SharedPreferences
         handlerThread.start()
         sensorHandler = Handler(handlerThread.looper)
         sensorManager.registerListener(
@@ -63,13 +72,21 @@ class AccelerometerHandler(
             Constants.SENSOR_SAMPLING_US,
             sensorHandler
         )
-        AppLogger.i(Constants.TAG, "AccelerometerHandler démarré (${Constants.SENSOR_SAMPLING_US / 1000} ms)")
+        AppLogger.i(Constants.TAG, "AccelerometerHandler démarré (seuil=%.1f m/s², min_crossings=$minCrossings)".format(thresholdMs2))
     }
 
     fun stop() {
         sensorManager.unregisterListener(this)
         handlerThread.quitSafely()
         AppLogger.i(Constants.TAG, "AccelerometerHandler arrêté")
+    }
+
+    /** Recharge les seuils depuis SharedPreferences */
+    private fun reloadThresholds() {
+        thresholdMs2 = prefs.getFloat(Constants.PREF_ACCEL_THRESHOLD, Constants.DEFAULT_ACCEL_THRESHOLD)
+        windowSizeMs = prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS)
+        minCrossings = prefs.getInt(Constants.PREF_MIN_CROSSINGS, Constants.DEFAULT_MIN_CROSSINGS)
+        AppLogger.d(Constants.TAG, "Seuils accéléromètre rechargés: seuil=$thresholdMs2, window=$windowSizeMs, min=$minCrossings")
     }
 
     // -------------------------------------------------------------------------
@@ -87,22 +104,22 @@ class AccelerometerHandler(
 
         onValueUpdate(magnitude)
 
-        // Détection rising edge : passage de sous → sur le seuil
-        if (previousMagnitude < Constants.THRESHOLD_MS2 && magnitude >= Constants.THRESHOLD_MS2) {
+        // Détection rising edge : passage de sous → sur le seuil dynamique
+        if (previousMagnitude < thresholdMs2 && magnitude >= thresholdMs2) {
             crossingTimestamps.addLast(now)
             AppLogger.d(Constants.TAG, "Dépassement #${crossingTimestamps.size} — magnitude=%.2f m/s²".format(magnitude))
         }
         previousMagnitude = magnitude
 
-        // Supprimer les événements plus vieux que la fenêtre
+        // Supprimer les événements plus vieux que la fenêtre dynamique
         while (crossingTimestamps.isNotEmpty() &&
-            (now - crossingTimestamps.first()) > Constants.WINDOW_SIZE_MS
+            (now - crossingTimestamps.first()) > windowSizeMs
         ) {
             crossingTimestamps.removeFirst()
         }
 
         // Vérifier si le seuil de déclenchement est atteint
-        if (crossingTimestamps.size >= Constants.MIN_CROSSINGS) {
+        if (crossingTimestamps.size >= minCrossings) {
             crossingTimestamps.clear()  // évite les déclenchements en cascade
             checkCooldownAndDispatch(now)
         }

@@ -16,6 +16,13 @@ object Constants {
     const val PREF_LAST_SMS_TIME      = "last_sms_time"
     const val PREF_PHONE_NUMBER       = "phone_number"      // destinataire SMS
 
+    // Configuration dynamique des seuils de détection
+    const val PREF_ACCEL_THRESHOLD          = "accel_threshold"
+    const val PREF_ROTATION_THRESHOLD       = "rotation_threshold"
+    const val PREF_MIN_CROSSINGS            = "min_crossings"
+    const val PREF_MIN_ROTATION_SAMPLES     = "min_rotation_samples"
+    const val PREF_WINDOW_SIZE_MS           = "window_size_ms"
+
     // Config SMTP conservée pour EmailSender (non utilisé par le service actuellement)
     const val PREF_SMTP_HOST          = "smtp_host"
     const val PREF_SMTP_PORT          = "smtp_port"
@@ -44,6 +51,13 @@ object Constants {
 
     /** Fréquence capteur : 50 ms = 20 Hz */
     const val SENSOR_SAMPLING_US = 50_000
+
+    // ---- Valeurs par défaut pour les seuils (réutilisées si prefs vides) ----
+    const val DEFAULT_ACCEL_THRESHOLD      = THRESHOLD_MS2
+    const val DEFAULT_ROTATION_THRESHOLD   = 2.0f
+    const val DEFAULT_MIN_CROSSINGS        = 3
+    const val DEFAULT_MIN_ROTATION_SAMPLES = 6
+    const val DEFAULT_WINDOW_SIZE_MS       = WINDOW_SIZE_MS
 
     // -------------------------------------------------------------------------
     // Détection rotation (gyroscope)
