@@ -13,6 +13,7 @@ object Constants {
     // -------------------------------------------------------------------------
     const val PREFS_NAME              = "poulinage_prefs"
     const val PREF_LAST_ALERT_TIME    = "last_alert_time"
+    const val PREF_LAST_SMS_TIME      = "last_sms_time"
     const val PREF_PHONE_NUMBER       = "phone_number"      // destinataire SMS
 
     // Config SMTP conservée pour EmailSender (non utilisé par le service actuellement)
@@ -33,10 +34,13 @@ object Constants {
     const val WINDOW_SIZE_MS     = 10_000L
 
     /** Nombre de dépassements (rising edge) nécessaires dans la fenêtre */
-    const val MIN_CROSSINGS      = 6
+    const val MIN_CROSSINGS      = 3
 
-    /** Cooldown partagé entre tous les types d'alerte : 30 minutes */
-    const val COOLDOWN_MS        = 30 * 60 * 1_000L
+    /** Cooldown partagé entre tous les types d'alerte : 5 secondes */
+    const val COOLDOWN_MS        = 5_000L
+
+    /** Cooldown SMS : 1 SMS maximum toutes les 30 secondes */
+    const val SMS_COOLDOWN_MS    = 30_000L
 
     /** Fréquence capteur : 50 ms = 20 Hz */
     const val SENSOR_SAMPLING_US = 50_000
@@ -58,7 +62,7 @@ object Constants {
      * Compter des échantillons (pas des rising-edges) permet de détecter
      * les rotations soutenues qui ne génèrent qu'un seul crossing.
      */
-    const val MIN_ROTATION_SAMPLES     = 12
+    const val MIN_ROTATION_SAMPLES     = 6
 
     // -------------------------------------------------------------------------
     // Types d'alerte

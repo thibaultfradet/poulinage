@@ -195,24 +195,33 @@ class FoalingDetectionService : Service() {
         updateNotification("ALERTE $alertType à $time")
         broadcastAlertFired(timestampMs, alertType, detail)
 
-        // 3. Envoi SMS (implementation commentée dans MessageSender)
-        MessageSender.sendAlertSms(
-            context     = this,
-            timestampMs = timestampMs,
-            alertType   = alertType,
-            detail      = detail,
-            onResult    = { success, error ->
-                if (success) {
-                    AppLogger.i(Constants.TAG, "SMS envoyé à $time")
-                    updateNotification("SMS envoyé ($time) — surveillance active")
-                    broadcastStatus("SMS envoyé à $time")
-                } else {
-                    AppLogger.e(Constants.TAG, "Erreur SMS : $error")
-                    updateNotification("Erreur SMS — surveillance active")
-                    broadcastStatus("Erreur SMS : $error")
+        // 3. Envoi SMS — limité à 1 SMS / 30 s
+        val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        val lastSms = prefs.getLong(Constants.PREF_LAST_SMS_TIME, 0L)
+        if (timestampMs - lastSms >= Constants.SMS_COOLDOWN_MS) {
+            prefs.edit().putLong(Constants.PREF_LAST_SMS_TIME, timestampMs).apply()
+            MessageSender.sendAlertSms(
+                context     = this,
+                timestampMs = timestampMs,
+                alertType   = alertType,
+                detail      = detail,
+                onResult    = { success, error ->
+                    if (success) {
+                        AppLogger.i(Constants.TAG, "SMS envoyé à $time")
+                        updateNotification("SMS envoyé ($time) — surveillance active")
+                        broadcastStatus("SMS envoyé à $time")
+                    } else {
+                        AppLogger.e(Constants.TAG, "Erreur SMS : $error")
+                        updateNotification("Erreur SMS — surveillance active")
+                        broadcastStatus("Erreur SMS : $error")
+                    }
                 }
-            }
-        )
+            )
+        } else {
+            val remainingSec = (Constants.SMS_COOLDOWN_MS - (timestampMs - lastSms)) / 1_000
+            AppLogger.i(Constants.TAG, "SMS ignoré — cooldown SMS actif (encore ${remainingSec}s)")
+            updateNotification("Alerte $alertType ($time) — surveillance active")
+        }
     }
 
     // -------------------------------------------------------------------------

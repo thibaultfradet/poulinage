@@ -241,6 +241,39 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
             ) { Text("Arrêter") }
         }
 
+        // ---- Reset cooldown -------------------------------------------------
+        val cooldownRemaining = run {
+            val last = prefs.getLong(Constants.PREF_LAST_ALERT_TIME, 0L)
+            val elapsed = System.currentTimeMillis() - last
+            val remaining = Constants.COOLDOWN_MS - elapsed
+            if (remaining > 0) remaining else 0L
+        }
+        if (cooldownRemaining > 0L) {
+            val mins = cooldownRemaining / 60_000
+            val secs = (cooldownRemaining % 60_000) / 1_000
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFFFF3E0))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Cooldown actif : ${mins}m ${secs}s restant",
+                    fontSize = 13.sp,
+                    color = Color(0xFFE65100)
+                )
+                TextButton(onClick = {
+                    prefs.edit().putLong(Constants.PREF_LAST_ALERT_TIME, 0L).apply()
+                    status = "Cooldown réinitialisé"
+                }) {
+                    Text("Reset", color = Color(0xFFE65100), fontSize = 13.sp)
+                }
+            }
+        }
+
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
 
         // ---- Configuration messagerie --------------------------------------
