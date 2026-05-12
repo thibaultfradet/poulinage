@@ -30,13 +30,21 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -56,12 +64,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Slider
 import androidx.core.content.ContextCompat
 import com.example.poulinage.ui.theme.PoulinageTheme
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+private enum class Screen { Home, History, Settings }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,39 +79,41 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             PoulinageTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    PoulinageScreen(modifier = Modifier.padding(innerPadding))
-                }
+                PoulinageScreen()
             }
         }
     }
 }
 
 @Composable
-fun PoulinageScreen(modifier: Modifier = Modifier) {
+fun PoulinageScreen() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
     val dateFormat = remember { SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.FRANCE) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-    // -------------------------------------------------------------------------
-    // État de l'UI
-    // -------------------------------------------------------------------------
+    var currentScreen by remember { mutableStateOf(Screen.Home) }
     var status by remember { mutableStateOf("Inactif") }
     var phoneNumber by remember { mutableStateOf(prefs.getString(Constants.PREF_PHONE_NUMBER, "") ?: "") }
     var accelMagnitude by remember { mutableStateOf(0f) }
-    var gyroMagnitude  by remember { mutableStateOf(0f) }
+    var gyroMagnitude by remember { mutableStateOf(0f) }
 
-    // État des seuils dynamiques
     var accelThreshold by remember { mutableStateOf(prefs.getFloat(Constants.PREF_ACCEL_THRESHOLD, Constants.DEFAULT_ACCEL_THRESHOLD)) }
     var rotationThreshold by remember { mutableStateOf(prefs.getFloat(Constants.PREF_ROTATION_THRESHOLD, Constants.DEFAULT_ROTATION_THRESHOLD)) }
     var minCrossings by remember { mutableStateOf(prefs.getInt(Constants.PREF_MIN_CROSSINGS, Constants.DEFAULT_MIN_CROSSINGS)) }
     var minRotationSamples by remember { mutableStateOf(prefs.getInt(Constants.PREF_MIN_ROTATION_SAMPLES, Constants.DEFAULT_MIN_ROTATION_SAMPLES)) }
-    var windowSize by remember { mutableStateOf(prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS) / 1000L) }  // en secondes
-
-    var showAdvancedSettings by remember { mutableStateOf(false) }
+    var windowSize by remember { mutableStateOf(prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS) / 1000L) }
 
     val historyEvents = remember { mutableStateListOf<AlertHistory.Event>() }
+
+    val todayStart = remember {
+        Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+    }
 
     fun reloadHistory() {
         historyEvents.clear()
@@ -109,9 +121,7 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
     }
 
     fun saveConfig() {
-        prefs.edit()
-            .putString(Constants.PREF_PHONE_NUMBER, phoneNumber.trim())
-            .apply()
+        prefs.edit().putString(Constants.PREF_PHONE_NUMBER, phoneNumber.trim()).apply()
     }
 
     fun saveAdvancedSettings() {
@@ -125,17 +135,11 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
         AppLogger.i(Constants.TAG, "Advanced settings sauvegardés")
     }
 
-    // -------------------------------------------------------------------------
-    // Chargement initial
-    // -------------------------------------------------------------------------
     LaunchedEffect(Unit) {
         reloadHistory()
         status = if (isServiceRunning(context)) "Surveillance active" else "Inactif"
     }
 
-    // -------------------------------------------------------------------------
-    // Permissions runtime
-    // -------------------------------------------------------------------------
     val multiPermLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -146,12 +150,10 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
 
     LaunchedEffect(Unit) {
         val needed = mutableListOf<String>()
-        // SEND_SMS — dangerous permission, requise sur toutes les versions
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
             != PackageManager.PERMISSION_GRANTED) {
             needed.add(Manifest.permission.SEND_SMS)
         }
-        // POST_NOTIFICATIONS — requise sur API 33+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED) {
@@ -160,22 +162,16 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
         if (needed.isNotEmpty()) multiPermLauncher.launch(needed.toTypedArray())
     }
 
-    // -------------------------------------------------------------------------
-    // BroadcastReceiver — mises à jour du service
-    // -------------------------------------------------------------------------
     DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 when (intent.action) {
-                    Constants.ACTION_STATUS_UPDATE -> {
+                    Constants.ACTION_STATUS_UPDATE ->
                         status = intent.getStringExtra(Constants.EXTRA_STATUS_MESSAGE) ?: status
-                    }
-                    Constants.ACTION_ALERT_FIRED -> {
-                        reloadHistory()
-                    }
+                    Constants.ACTION_ALERT_FIRED -> reloadHistory()
                     Constants.ACTION_SENSOR_VALUES -> {
                         accelMagnitude = intent.getFloatExtra(Constants.EXTRA_ACCEL_MAGNITUDE, 0f)
-                        gyroMagnitude  = intent.getFloatExtra(Constants.EXTRA_GYRO_MAGNITUDE, 0f)
+                        gyroMagnitude = intent.getFloatExtra(Constants.EXTRA_GYRO_MAGNITUDE, 0f)
                     }
                 }
             }
@@ -194,340 +190,436 @@ fun PoulinageScreen(modifier: Modifier = Modifier) {
         onDispose { context.unregisterReceiver(receiver) }
     }
 
-    // -------------------------------------------------------------------------
-    // Interface utilisateur
-    // -------------------------------------------------------------------------
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-
-        // ---- Titre ----------------------------------------------------------
-        Text(
-            text = "Détection Poulinage",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 2.dp)
-        )
-        Text(text = "Statut : $status", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-        // Valeurs capteur en temps réel (visibles uniquement si le service est actif)
-        if (accelMagnitude > 0f || gyroMagnitude > 0f) {
-            Spacer(Modifier.height(6.dp))
-            SensorGauge(
-                label     = "Accéléromètre",
-                value     = accelMagnitude,
-                threshold = Constants.THRESHOLD_MS2,
-                unit      = "m/s²"
-            )
-            Spacer(Modifier.height(4.dp))
-            SensorGauge(
-                label     = "Gyroscope",
-                value     = gyroMagnitude,
-                threshold = Constants.ROTATION_THRESHOLD_RADS,
-                unit      = "rad/s"
-            )
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.Home, contentDescription = "Accueil") },
+                    label = { Text("Accueil") },
+                    selected = currentScreen == Screen.Home,
+                    onClick = { currentScreen = Screen.Home }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.History, contentDescription = "Historique") },
+                    label = { Text("Historique") },
+                    selected = currentScreen == Screen.History,
+                    onClick = { currentScreen = Screen.History }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Paramètres") },
+                    label = { Text("Paramètres") },
+                    selected = currentScreen == Screen.Settings,
+                    onClick = { currentScreen = Screen.Settings }
+                )
+            }
         }
+    ) { innerPadding ->
 
-        Spacer(Modifier.height(4.dp))
+        when (currentScreen) {
 
-        // ---- Boutons Démarrer / Arrêter ------------------------------------
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Button(
-                onClick = {
-                    saveConfig()
-                    ContextCompat.startForegroundService(
-                        context,
-                        Intent(context, FoalingDetectionService::class.java)
-                    )
-                    status = "Démarrage..."
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
-                modifier = Modifier.weight(1f)
-            ) { Text("Démarrer") }
-
-            Button(
-                onClick = {
-                    context.stopService(Intent(context, FoalingDetectionService::class.java))
-                    status = "Arrêté"
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                modifier = Modifier.weight(1f)
-            ) { Text("Arrêter") }
-        }
-
-        // ---- Reset cooldown -------------------------------------------------
-        val cooldownRemaining = run {
-            val last = prefs.getLong(Constants.PREF_LAST_ALERT_TIME, 0L)
-            val elapsed = System.currentTimeMillis() - last
-            val remaining = Constants.COOLDOWN_MS - elapsed
-            if (remaining > 0) remaining else 0L
-        }
-        if (cooldownRemaining > 0L) {
-            val mins = cooldownRemaining / 60_000
-            val secs = (cooldownRemaining % 60_000) / 1_000
-            Row(
+            // =================================================================
+            // ACCUEIL
+            // =================================================================
+            Screen.Home -> Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFFFF3E0))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = "Cooldown actif : ${mins}m ${secs}s restant",
-                    fontSize = 13.sp,
-                    color = Color(0xFFE65100)
+                    text = "Détection Poulinage",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 2.dp)
                 )
-                TextButton(onClick = {
-                    prefs.edit().putLong(Constants.PREF_LAST_ALERT_TIME, 0L).apply()
-                    status = "Cooldown réinitialisé"
-                }) {
-                    Text("Reset", color = Color(0xFFE65100), fontSize = 13.sp)
+                Text(
+                    text = "Statut : $status",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                if (accelMagnitude > 0f || gyroMagnitude > 0f) {
+                    Spacer(Modifier.height(6.dp))
+                    SensorGauge("Accéléromètre", accelMagnitude, accelThreshold, "m/s²")
+                    Spacer(Modifier.height(4.dp))
+                    SensorGauge("Gyroscope", gyroMagnitude, rotationThreshold, "rad/s")
                 }
-            }
-        }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+                Spacer(Modifier.height(4.dp))
 
-        // ---- Configuration messagerie --------------------------------------
-        Text(text = "Configuration messagerie", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-
-        OutlinedTextField(
-            value = phoneNumber,
-            onValueChange = { phoneNumber = it },
-            label = { Text("Numéro de téléphone destinataire") },
-            placeholder = { Text("ex: +33612345678") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            OutlinedButton(
-                onClick = { saveConfig(); status = "Configuration sauvegardée" },
-                modifier = Modifier.weight(1f)
-            ) { Text("Sauvegarder") }
-
-            TextButton(
-                onClick = {
-                    saveConfig()
-                    status = "Envoi SMS test..."
-                    MessageSender.sendAlertSms(
-                        context     = context,
-                        timestampMs = System.currentTimeMillis(),
-                        alertType   = Constants.ALERT_TYPE_MOVEMENT,
-                        detail      = "Test manuel depuis l'app",
-                        onResult    = { success, error ->
-                            mainHandler.post {
-                                status = if (success) "SMS test envoyé (simulation)"
-                                         else "Erreur : $error"
-                            }
-                        }
-                    )
-                },
-                modifier = Modifier.weight(1f)
-            ) { Text("Tester SMS") }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-
-        // ---- Configuration avancée (seuils dynamiques) ----------------------
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Paramètres avancés",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            TextButton(onClick = { showAdvancedSettings = !showAdvancedSettings }) {
-                Text(if (showAdvancedSettings) "Masquer" else "Afficher", fontSize = 12.sp)
-            }
-        }
-
-        if (showAdvancedSettings) {
-            Spacer(Modifier.height(8.dp))
-
-            // ---- Seuil accéléromètre ----
-            Text(
-                text = "Seuil accéléromètre: %.2f m/s² (%.2f g)".format(
-                    accelThreshold,
-                    accelThreshold / 9.81f
-                ),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Slider(
-                value = accelThreshold,
-                onValueChange = { accelThreshold = it },
-                valueRange = 4.9f..24.5f,  // 0.5g à 2.5g
-                modifier = Modifier.fillMaxWidth(),
-                steps = 29  // Plus de précision
-            )
-            Text(
-                text = "Plage: 0.5g (4.9 m/s²) à 2.5g (24.5 m/s²)",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-
-            // ---- Seuil gyroscope ----
-            Text(
-                text = "Seuil gyroscope: %.2f rad/s (≈%.0f°/s)".format(
-                    rotationThreshold,
-                    rotationThreshold * 57.3f  // conversion rad/s en °/s
-                ),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Slider(
-                value = rotationThreshold,
-                onValueChange = { rotationThreshold = it },
-                valueRange = 0.5f..3.0f,
-                modifier = Modifier.fillMaxWidth(),
-                steps = 24
-            )
-            Text(
-                text = "Plage: 0.5 rad/s (≈29°/s) à 3.0 rad/s (≈172°/s)",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-
-            // ---- Min crossings accéléromètre ----
-            Text(
-                text = "Min. dépassements accéléromètre: $minCrossings",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Slider(
-                value = minCrossings.toFloat(),
-                onValueChange = { minCrossings = it.toInt() },
-                valueRange = 1f..10f,
-                modifier = Modifier.fillMaxWidth(),
-                steps = 8
-            )
-            Text(
-                text = "Nombre de dépassements du seuil requis dans la fenêtre de temps",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-
-            // ---- Min rotation samples ----
-            Text(
-                text = "Min. échantillons rotation: $minRotationSamples",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Slider(
-                value = minRotationSamples.toFloat(),
-                onValueChange = { minRotationSamples = it.toInt() },
-                valueRange = 1f..10f,
-                modifier = Modifier.fillMaxWidth(),
-                steps = 8
-            )
-            Text(
-                text = "Nombre d'échantillons au-dessus du seuil requis (à 20 Hz)",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-
-            // ---- Fenêtre de temps ----
-            Text(
-                text = "Fenêtre de temps: ${windowSize}s",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Slider(
-                value = windowSize.toFloat(),
-                onValueChange = { windowSize = it.toLong() },
-                valueRange = 5f..20f,
-                modifier = Modifier.fillMaxWidth(),
-                steps = 14
-            )
-            Text(
-                text = "Durée sur laquelle les seuils sont accumulés",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(16.dp))
-
-            // Bouton Sauvegarder les paramètres
-            Button(
-                onClick = {
-                    saveAdvancedSettings()
-                    status = "Paramètres avancés sauvegardés (service doit être redémarré)"
-                    // Auto-restart service if running
-                    if (isServiceRunning(context)) {
-                        context.stopService(Intent(context, FoalingDetectionService::class.java))
-                        Handler(Looper.getMainLooper()).postDelayed({
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Button(
+                        onClick = {
+                            saveConfig()
                             ContextCompat.startForegroundService(
                                 context,
                                 Intent(context, FoalingDetectionService::class.java)
                             )
-                        }, 500)
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Sauvegarder les paramètres")
-            }
-        }
+                            status = "Démarrage..."
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388E3C)),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Démarrer") }
 
-        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Historique (${historyEvents.size})",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            if (historyEvents.isNotEmpty()) {
-                TextButton(onClick = {
-                    AlertHistory.clear(context)
-                    reloadHistory()
-                }) {
-                    Text("Vider", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                    Button(
+                        onClick = {
+                            context.stopService(Intent(context, FoalingDetectionService::class.java))
+                            status = "Arrêté"
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Arrêter") }
                 }
+
+                // Temps d'attente (anciennement "cooldown")
+                val cooldownRemaining = run {
+                    val last = prefs.getLong(Constants.PREF_LAST_ALERT_TIME, 0L)
+                    val remaining = Constants.COOLDOWN_MS - (System.currentTimeMillis() - last)
+                    if (remaining > 0) remaining else 0L
+                }
+                if (cooldownRemaining > 0L) {
+                    val mins = cooldownRemaining / 60_000
+                    val secs = (cooldownRemaining % 60_000) / 1_000
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFFFFF3E0))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Temps d'attente actif : ${mins}m ${secs}s restant",
+                            fontSize = 13.sp,
+                            color = Color(0xFFE65100)
+                        )
+                        TextButton(onClick = {
+                            prefs.edit().putLong(Constants.PREF_LAST_ALERT_TIME, 0L).apply()
+                            status = "Temps d'attente réinitialisé"
+                        }) {
+                            Text("Reset", color = Color(0xFFE65100), fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+                Text(
+                    text = "Configuration messagerie",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = { phoneNumber = it },
+                    label = { Text("Numéro de téléphone destinataire") },
+                    placeholder = { Text("ex: +33612345678") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = { saveConfig(); status = "Configuration sauvegardée" },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Sauvegarder") }
+
+                    TextButton(
+                        onClick = {
+                            saveConfig()
+                            status = "Envoi SMS test..."
+                            MessageSender.sendAlertSms(
+                                context = context,
+                                timestampMs = System.currentTimeMillis(),
+                                alertType = Constants.ALERT_TYPE_MOVEMENT,
+                                detail = "Test manuel depuis l'app",
+                                onResult = { success, error ->
+                                    mainHandler.post {
+                                        status = if (success) "SMS test envoyé (simulation)"
+                                        else "Erreur : $error"
+                                    }
+                                }
+                            )
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Tester SMS") }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+                val todayEvents = historyEvents.filter { it.timestamp >= todayStart }
+                Text(
+                    text = "Alertes du jour (${todayEvents.size})",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (todayEvents.isEmpty()) {
+                    Text(
+                        text = "Aucune alerte aujourd'hui.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    todayEvents.forEach { event ->
+                        AlertEventRow(event = event, dateFormat = dateFormat)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+            }
+
+            // =================================================================
+            // HISTORIQUE
+            // =================================================================
+            Screen.History -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Historique (${historyEvents.size})",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (historyEvents.isNotEmpty()) {
+                        TextButton(onClick = {
+                            AlertHistory.clear(context)
+                            reloadHistory()
+                        }) {
+                            Text("Vider", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                if (historyEvents.isEmpty()) {
+                    Text(
+                        text = "Aucune alerte enregistrée.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    historyEvents.forEach { event ->
+                        AlertEventRow(event = event, dateFormat = dateFormat)
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+            }
+
+            // =================================================================
+            // PARAMÈTRES
+            // =================================================================
+            Screen.Settings -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = "Paramètres avancés", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Ces réglages contrôlent la sensibilité de la détection. Modifie-les avec précaution — une mauvaise valeur peut générer des fausses alertes ou en rater de vraies.",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // ---- Seuil accéléromètre ----
+                Text(
+                    text = "Seuil accéléromètre : %.2f m/s² (%.2f g)".format(
+                        accelThreshold,
+                        accelThreshold / 9.81f
+                    ),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Niveau de secousse à partir duquel l'app considère qu'il se passe quelque chose. " +
+                            "Trop bas = fausses alertes à la moindre vibration. " +
+                            "Trop haut = alertes manquées si la jument bouge doucement. " +
+                            "La valeur par défaut (1,8g) correspond à un mouvement fort typique d'une jument qui se couche ou se lève.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = accelThreshold,
+                    onValueChange = { accelThreshold = it },
+                    valueRange = 4.9f..24.5f,
+                    modifier = Modifier.fillMaxWidth(),
+                    steps = 29
+                )
+                Text(
+                    text = "Plage : 0,5g (4,9 m/s²)  ←  valeur actuelle  →  2,5g (24,5 m/s²)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // ---- Seuil gyroscope ----
+                Text(
+                    text = "Seuil gyroscope : %.2f rad/s (≈%.0f°/s)".format(
+                        rotationThreshold,
+                        rotationThreshold * 57.3f
+                    ),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Vitesse de rotation du téléphone à partir de laquelle l'app détecte un retournement. " +
+                            "Trop bas = l'app se déclenche pour rien (même un léger déplacement du téléphone). " +
+                            "Trop haut = la jument peut se retourner sans que l'app le voie. " +
+                            "La valeur par défaut (≈115°/s) est calibrée pour un roulement typique lors d'une mise-bas.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = rotationThreshold,
+                    onValueChange = { rotationThreshold = it },
+                    valueRange = 0.5f..3.0f,
+                    modifier = Modifier.fillMaxWidth(),
+                    steps = 24
+                )
+                Text(
+                    text = "Plage : 0,5 rad/s (≈29°/s)  ←  valeur actuelle  →  3,0 rad/s (≈172°/s)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // ---- Min crossings ----
+                Text(
+                    text = "Dépassements minimum : $minCrossings",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Combien de fois le seuil d'accélération doit être franchi dans la fenêtre de temps avant d'envoyer une alerte. " +
+                            "Plus ce nombre est élevé, moins il y a de fausses alertes — mais plus on risque d'en manquer. " +
+                            "3 est un bon compromis : il faut 3 secousses fortes en peu de temps pour déclencher l'alerte.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = minCrossings.toFloat(),
+                    onValueChange = { minCrossings = it.toInt() },
+                    valueRange = 1f..10f,
+                    modifier = Modifier.fillMaxWidth(),
+                    steps = 8
+                )
+                Text(
+                    text = "Plage : 1 (très sensible)  ←  valeur actuelle  →  10 (très strict)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // ---- Min rotation samples ----
+                Text(
+                    text = "Échantillons de rotation minimum : $minRotationSamples",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Combien d'instants consécutifs de rotation forte sont nécessaires pour déclencher une alerte. " +
+                            "Fonctionne exactement comme le réglage précédent, mais pour la rotation plutôt que les secousses. " +
+                            "Plus c'est élevé, plus la détection est stricte et moins il y a de fausses alertes.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = minRotationSamples.toFloat(),
+                    onValueChange = { minRotationSamples = it.toInt() },
+                    valueRange = 1f..10f,
+                    modifier = Modifier.fillMaxWidth(),
+                    steps = 8
+                )
+                Text(
+                    text = "Plage : 1 (très sensible)  ←  valeur actuelle  →  10 (très strict)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // ---- Fenêtre de temps ----
+                Text(
+                    text = "Fenêtre de temps : ${windowSize}s",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "Durée pendant laquelle l'app regarde en arrière pour compter les dépassements. " +
+                            "Exemple avec 10s : les 3 secousses doivent toutes arriver en moins de 10 secondes pour déclencher l'alerte. " +
+                            "Plus grande = plus permissif (détecte des mouvements étalés). " +
+                            "Plus petite = plus strict (détecte seulement des mouvements rapides et concentrés).",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Slider(
+                    value = windowSize.toFloat(),
+                    onValueChange = { windowSize = it.toLong() },
+                    valueRange = 5f..20f,
+                    modifier = Modifier.fillMaxWidth(),
+                    steps = 14
+                )
+                Text(
+                    text = "Plage : 5s (strict)  ←  valeur actuelle  →  20s (permissif)",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        saveAdvancedSettings()
+                        status = "Paramètres sauvegardés"
+                        if (isServiceRunning(context)) {
+                            context.stopService(Intent(context, FoalingDetectionService::class.java))
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                ContextCompat.startForegroundService(
+                                    context,
+                                    Intent(context, FoalingDetectionService::class.java)
+                                )
+                            }, 500)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Sauvegarder les paramètres")
+                }
+
+                Spacer(Modifier.height(24.dp))
             }
         }
-
-        if (historyEvents.isEmpty()) {
-            Text(
-                text = "Aucune alerte enregistrée.",
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-        } else {
-            historyEvents.forEach { event ->
-                AlertEventRow(event = event, dateFormat = dateFormat)
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
     }
 }
 
-// -------------------------------------------------------------------------
-// Vérifie si FoalingDetectionService est en cours d'exécution.
-// -------------------------------------------------------------------------
 @Suppress("DEPRECATION")
 private fun isServiceRunning(context: Context): Boolean {
     val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -535,17 +627,8 @@ private fun isServiceRunning(context: Context): Boolean {
         .any { it.service.className == FoalingDetectionService::class.java.name }
 }
 
-// -------------------------------------------------------------------------
-// Composant : jauge capteur temps réel
-// -------------------------------------------------------------------------
-
 @Composable
-private fun SensorGauge(
-    label: String,
-    value: Float,
-    threshold: Float,
-    unit: String
-) {
+private fun SensorGauge(label: String, value: Float, threshold: Float, unit: String) {
     val ratio = (value / threshold).coerceIn(0f, 1f)
     val isOver = value >= threshold
     val barColor = when {
@@ -553,7 +636,6 @@ private fun SensorGauge(
         ratio > 0.5f  -> Color(0xFFF57C00)
         else          -> Color(0xFF388E3C)
     }
-
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -586,19 +668,11 @@ private fun SensorGauge(
     }
 }
 
-// -------------------------------------------------------------------------
-// Composant : une ligne d'historique
-// -------------------------------------------------------------------------
-
 @Composable
-private fun AlertEventRow(
-    event: AlertHistory.Event,
-    dateFormat: SimpleDateFormat
-) {
+private fun AlertEventRow(event: AlertHistory.Event, dateFormat: SimpleDateFormat) {
     val isMovement = event.type == Constants.ALERT_TYPE_MOVEMENT
     val badgeColor = if (isMovement) Color(0xFF1565C0) else Color(0xFF6A1B9A)
     val badgeLabel = if (isMovement) "MOUVEMENT" else "ROTATION"
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -616,7 +690,6 @@ private fun AlertEventRow(
         ) {
             Text(text = badgeLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
-
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = dateFormat.format(Date(event.timestamp)),
