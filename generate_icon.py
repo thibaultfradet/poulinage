@@ -25,13 +25,14 @@ adaptive_sizes = {
     "mipmap-xxxhdpi": 432,
 }
 
-# Background blanc pour l'adaptive icon
-BG_COLOR = (255, 255, 255, 255)
-
 FONT_PATHS = [
     "/System/Library/Fonts/Apple Color Emoji.ttc",
     "/System/Library/Fonts/AppleColorEmoji.ttf",
 ]
+
+# Pillow / Apple Color Emoji ne rend pas les emojis couleur au-delà de ~72px.
+# On rend à cette taille de base puis on upscale avec LANCZOS.
+MAX_RENDER_PX = 72
 
 
 def get_font(size):
@@ -44,16 +45,19 @@ def get_font(size):
     return ImageFont.load_default()
 
 
-def render_emoji(canvas_size, emoji_size_ratio=0.75):
-    """Rend l'emoji centré sur un fond blanc."""
-    img = Image.new("RGBA", (canvas_size, canvas_size), BG_COLOR)
+def render_emoji(canvas_size, bg_color=(255, 255, 255, 255), emoji_size_ratio=0.75):
+    """Rend l'emoji centré, puis upscale si nécessaire."""
+    render_size = min(canvas_size, MAX_RENDER_PX)
+    img = Image.new("RGBA", (render_size, render_size), bg_color)
     draw = ImageDraw.Draw(img)
-    font = get_font(int(canvas_size * emoji_size_ratio))
+    font = get_font(int(render_size * emoji_size_ratio))
     bbox = draw.textbbox((0, 0), EMOJI, font=font, embedded_color=True)
     w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    x = (canvas_size - w) // 2 - bbox[0]
-    y = (canvas_size - h) // 2 - bbox[1]
+    x = (render_size - w) // 2 - bbox[0]
+    y = (render_size - h) // 2 - bbox[1]
     draw.text((x, y), EMOJI, font=font, embedded_color=True)
+    if canvas_size != render_size:
+        img = img.resize((canvas_size, canvas_size), Image.LANCZOS)
     return img
 
 
