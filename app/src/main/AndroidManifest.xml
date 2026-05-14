@@ -17,8 +17,11 @@
     <!-- Notifications (permission runtime API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Envoi SMS — décommenter dans MessageSender.kt pour l'activer -->
+    <!-- Envoi SMS -->
     <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- Recommandé pour les appareils dual-SIM (ex. Huawei Y5 2018) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- Capteurs déclarés comme optionnels pour ne pas bloquer l'installation -->
     <uses-feature
