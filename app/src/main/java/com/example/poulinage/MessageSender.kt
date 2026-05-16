@@ -87,7 +87,7 @@ object MessageSender {
             if (parts.size == 1) {
                 smsManager.sendTextMessage(phoneNumber, null, message, sentIntent, null)
             } else {
-                val sentIntents = ArrayList<PendingIntent>(parts.size).apply {
+                val sentIntents = ArrayList<PendingIntent?>(parts.size).apply {
                     add(sentIntent)
                     repeat(parts.size - 1) { add(null) }
                 }
