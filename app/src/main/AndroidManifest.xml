@@ -20,8 +20,6 @@
     <!-- Envoi SMS -->
     <uses-permission android:name="android.permission.SEND_SMS" />
 
-    <!-- Recommandé pour les appareils dual-SIM (ex. Huawei Y5 2018) -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <!-- Capteurs déclarés comme optionnels pour ne pas bloquer l'installation -->
     <uses-feature
