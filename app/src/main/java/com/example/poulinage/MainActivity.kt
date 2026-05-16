@@ -26,11 +26,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -71,7 +74,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-private enum class Screen { Home, History, Settings }
+private enum class Screen { Home, History, Settings, Logs }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,6 +108,12 @@ fun PoulinageScreen() {
     var windowSize by remember { mutableStateOf(prefs.getLong(Constants.PREF_WINDOW_SIZE_MS, Constants.DEFAULT_WINDOW_SIZE_MS) / 1000L) }
 
     val historyEvents = remember { mutableStateListOf<AlertHistory.Event>() }
+    val logEntries = remember { mutableStateListOf<AppLogger.Entry>() }
+
+    fun reloadLogs() {
+        logEntries.clear()
+        logEntries.addAll(AppLogger.getAll())
+    }
 
     val todayStart = remember {
         Calendar.getInstance().apply {
@@ -138,6 +147,10 @@ fun PoulinageScreen() {
     LaunchedEffect(Unit) {
         reloadHistory()
         status = if (isServiceRunning(context)) "Surveillance active" else "Inactif"
+    }
+
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == Screen.Logs) reloadLogs()
     }
 
     val multiPermLauncher = rememberLauncherForActivityResult(
@@ -210,6 +223,12 @@ fun PoulinageScreen() {
                     label = { Text("Paramètres") },
                     selected = currentScreen == Screen.Settings,
                     onClick = { currentScreen = Screen.Settings }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Filled.BugReport, contentDescription = "Logs") },
+                    label = { Text("Logs") },
+                    selected = currentScreen == Screen.Logs,
+                    onClick = { currentScreen = Screen.Logs }
                 )
             }
         }
@@ -423,6 +442,58 @@ fun PoulinageScreen() {
                 }
 
                 Spacer(Modifier.height(24.dp))
+            }
+
+            // =================================================================
+            // LOGS
+            // =================================================================
+            Screen.Logs -> Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Logs (${logEntries.size})",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row {
+                        TextButton(onClick = { reloadLogs() }) {
+                            Text("Rafraîchir", fontSize = 13.sp)
+                        }
+                        if (logEntries.isNotEmpty()) {
+                            TextButton(onClick = {
+                                AppLogger.clear()
+                                reloadLogs()
+                            }) {
+                                Text("Effacer", color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+
+                if (logEntries.isEmpty()) {
+                    Text(
+                        text = "Aucun log enregistré.",
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(logEntries) { entry -> LogEntryRow(entry = entry) }
+                        item { Spacer(Modifier.height(16.dp)) }
+                    }
+                }
             }
 
             // =================================================================
@@ -663,6 +734,51 @@ private fun SensorGauge(label: String, value: Float, threshold: Float, unit: Str
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .background(barColor)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LogEntryRow(entry: AppLogger.Entry) {
+    val badgeColor = when (entry.level) {
+        'E' -> Color(0xFFB71C1C)
+        'W' -> Color(0xFFE65100)
+        'D' -> Color(0xFF1565C0)
+        else -> Color(0xFF37474F)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(badgeColor.copy(alpha = 0.08f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(3.dp))
+                .background(badgeColor)
+                .padding(horizontal = 5.dp, vertical = 1.dp)
+        ) {
+            Text(
+                text = entry.level.toString(),
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.message,
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = entry.formatted.substringBefore("]").trimStart('['),
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

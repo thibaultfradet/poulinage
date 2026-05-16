@@ -11,7 +11,7 @@ import java.util.Locale
 
 object RemoteLogger {
 
-    private const val API_URL = "http://api-poulinage.thibault-fradet.fr/api/log"
+    private const val API_URL = "https://api-poulinage.thibault-fradet.fr/api/log"
     private val tsFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.FRANCE)
 
     fun warn(title: String, context: Map<String, Any?> = emptyMap()) = post(title, context)
@@ -55,7 +55,9 @@ object RemoteLogger {
                 conn.inputStream.use { }
                 conn.disconnect()
             } catch (e: Exception) {
-                Log.e(Constants.TAG, "RemoteLogger: impossible d'envoyer le log — ${e.message}")
+                val msg = "RemoteLogger HTTP échoué (${e.javaClass.simpleName}) : ${e.message}"
+                Log.e(Constants.TAG, msg)
+                AppLogger.e(Constants.TAG, msg)
             }
         }.also { it.isDaemon = true }.start()
     }

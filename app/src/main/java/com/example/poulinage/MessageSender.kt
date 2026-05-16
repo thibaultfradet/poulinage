@@ -152,7 +152,7 @@ object MessageSender {
                 }
                 smsManager.sendMultipartTextMessage(phoneNumber, null, parts, sentIntents, null)
             }
-            AppLogger.i(Constants.TAG, "SMS soumis au système → $maskedNumber (${message.length} cars, ${smsManager.divideMessage(message).size} partie(s))")
+            AppLogger.i(Constants.TAG, "SMS soumis au système → $maskedNumber (${message.length} cars, ${parts.size} partie(s))")
         } catch (e: SecurityException) {
             val msg = "Permission refusée pour l'envoi SMS : ${e.message}"
             AppLogger.e(Constants.TAG, msg)
