@@ -27,8 +27,13 @@ object MessageSender {
         val rawNumber = prefs.getString(Constants.PREF_PHONE_NUMBER, "") ?: ""
 
         if (rawNumber.isBlank()) {
-            AppLogger.w(Constants.TAG, "Numéro non configuré — SMS non envoyé")
-            onResult?.invoke(false, "Numéro de téléphone non configuré")
+            val msg = "Numéro de téléphone non configuré"
+            AppLogger.w(Constants.TAG, "SMS non envoyé — $msg")
+            RemoteLogger.warn("SMS_NO_PHONE_NUMBER", mapOf(
+                "alert_type" to alertType,
+                "detail" to detail
+            ))
+            onResult?.invoke(false, msg)
             return
         }
 
@@ -37,52 +42,106 @@ object MessageSender {
             "+33${rawNumber.substring(1)}"
         } else rawNumber
 
+        val maskedNumber = phoneNumber.take(4) + "****" + phoneNumber.takeLast(3)
         val message = buildSmsBody(timestampMs, alertType, detail)
 
-        try {
-            val smsManager: SmsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val smsManager: SmsManager = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 context.getSystemService(SmsManager::class.java)
-                    ?: throw IllegalStateException("SmsManager indisponible")
+                    ?: throw IllegalStateException("SmsManager.getSystemService a retourné null")
             } else {
                 @Suppress("DEPRECATION")
                 SmsManager.getDefault()
             }
+        } catch (e: Exception) {
+            val msg = "Impossible d'obtenir SmsManager : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_MANAGER_INIT_ERROR", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber,
+                "api_level" to Build.VERSION.SDK_INT
+            ))
+            onResult?.invoke(false, msg)
+            return
+        }
 
-            val sentAction = "SMS_SENT_${timestampMs}"
-            val sentIntent = PendingIntent.getBroadcast(
+        val sentAction = "SMS_SENT_$timestampMs"
+        val sentIntent: PendingIntent = try {
+            PendingIntent.getBroadcast(
                 context,
                 0,
                 Intent(sentAction).setPackage(context.packageName),
                 PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
             )
+        } catch (e: Exception) {
+            val msg = "Impossible de créer le PendingIntent : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_PENDING_INTENT_ERROR", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber
+            ))
+            onResult?.invoke(false, msg)
+            return
+        }
 
-            val sentReceiver = object : BroadcastReceiver() {
-                override fun onReceive(ctx: Context, intent: Intent) {
+        val sentReceiver = object : BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                try {
                     context.unregisterReceiver(this)
-                    val success = resultCode == Activity.RESULT_OK
-                    val error = when (resultCode) {
-                        SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "Erreur générique"
-                        SmsManager.RESULT_ERROR_NO_SERVICE      -> "Pas de réseau"
-                        SmsManager.RESULT_ERROR_NULL_PDU        -> "PDU null"
-                        SmsManager.RESULT_ERROR_RADIO_OFF       -> "Radio éteinte (mode avion ?)"
-                        else                                    -> "Code erreur $resultCode"
-                    }
-                    if (success) {
-                        AppLogger.i(Constants.TAG, "SMS confirmé envoyé à $phoneNumber")
-                    } else {
-                        AppLogger.e(Constants.TAG, "SMS ECHOUE ($phoneNumber) : $error")
-                    }
-                    onResult?.invoke(success, if (success) null else error)
+                } catch (e: Exception) {
+                    RemoteLogger.warn("SMS_UNREGISTER_RECEIVER_WARNING", mapOf(
+                        "warning" to e.message,
+                        "alert_type" to alertType
+                    ))
                 }
-            }
 
+                val success = resultCode == Activity.RESULT_OK
+                val errorLabel = when (resultCode) {
+                    Activity.RESULT_OK                          -> null
+                    SmsManager.RESULT_ERROR_GENERIC_FAILURE     -> "RESULT_ERROR_GENERIC_FAILURE"
+                    SmsManager.RESULT_ERROR_NO_SERVICE          -> "RESULT_ERROR_NO_SERVICE"
+                    SmsManager.RESULT_ERROR_NULL_PDU            -> "RESULT_ERROR_NULL_PDU"
+                    SmsManager.RESULT_ERROR_RADIO_OFF           -> "RESULT_ERROR_RADIO_OFF"
+                    else                                        -> "UNKNOWN_RESULT_CODE_$resultCode"
+                }
+
+                if (success) {
+                    AppLogger.i(Constants.TAG, "SMS confirmé envoyé → $maskedNumber")
+                } else {
+                    val msg = "SMS refusé par le système : $errorLabel (code=$resultCode)"
+                    AppLogger.e(Constants.TAG, msg)
+                    RemoteLogger.warn("SMS_SENT_FAILURE", mapOf(
+                        "result_code" to resultCode,
+                        "error_label" to errorLabel,
+                        "phone" to maskedNumber,
+                        "alert_type" to alertType,
+                        "detail" to detail,
+                        "message_length" to message.length
+                    ))
+                }
+                onResult?.invoke(success, errorLabel)
+            }
+        }
+
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(sentReceiver, IntentFilter(sentAction), Context.RECEIVER_NOT_EXPORTED)
             } else {
                 @Suppress("UnspecifiedRegisterReceiverFlag")
                 context.registerReceiver(sentReceiver, IntentFilter(sentAction))
             }
+        } catch (e: Exception) {
+            val msg = "Impossible d'enregistrer le BroadcastReceiver : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_REGISTER_RECEIVER_ERROR", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber
+            ))
+            onResult?.invoke(false, msg)
+            return
+        }
 
+        try {
             val parts = smsManager.divideMessage(message)
             if (parts.size == 1) {
                 smsManager.sendTextMessage(phoneNumber, null, message, sentIntent, null)
@@ -93,12 +152,35 @@ object MessageSender {
                 }
                 smsManager.sendMultipartTextMessage(phoneNumber, null, parts, sentIntents, null)
             }
-
-            AppLogger.i(Constants.TAG, "SMS soumis au système → $phoneNumber (attente confirmation)")
-
+            AppLogger.i(Constants.TAG, "SMS soumis au système → $maskedNumber (${message.length} cars, ${smsManager.divideMessage(message).size} partie(s))")
+        } catch (e: SecurityException) {
+            val msg = "Permission refusée pour l'envoi SMS : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_SECURITY_EXCEPTION", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber,
+                "hint" to "Vérifier permission SEND_SMS accordée au runtime"
+            ))
+            onResult?.invoke(false, msg)
+        } catch (e: IllegalArgumentException) {
+            val msg = "Argument invalide pour l'envoi SMS : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_ILLEGAL_ARGUMENT", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber,
+                "message_length" to message.length,
+                "raw_number" to rawNumber.take(4) + "****"
+            ))
+            onResult?.invoke(false, msg)
         } catch (e: Exception) {
-            AppLogger.e(Constants.TAG, "Exception envoi SMS : ${e.message}")
-            onResult?.invoke(false, e.message)
+            val msg = "Erreur inattendue lors de l'envoi SMS : ${e.message}"
+            AppLogger.e(Constants.TAG, msg)
+            RemoteLogger.error("SMS_UNEXPECTED_ERROR", e, mapOf(
+                "alert_type" to alertType,
+                "phone" to maskedNumber,
+                "message_length" to message.length
+            ))
+            onResult?.invoke(false, msg)
         }
     }
 
