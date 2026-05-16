@@ -14,6 +14,7 @@ object RemoteLogger {
     private const val API_URL = "https://api-poulinage.thibault-fradet.fr/api/log"
     private val tsFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.FRANCE)
 
+    fun info(title: String, context: Map<String, Any?> = emptyMap()) = post(title, context)
     fun warn(title: String, context: Map<String, Any?> = emptyMap()) = post(title, context)
 
     fun error(title: String, e: Throwable? = null, context: Map<String, Any?> = emptyMap()) {

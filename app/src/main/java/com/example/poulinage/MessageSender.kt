@@ -107,6 +107,12 @@ object MessageSender {
 
                 if (success) {
                     AppLogger.i(Constants.TAG, "SMS confirmé envoyé → $maskedNumber")
+                    RemoteLogger.info("SMS_SENT_SUCCESS", mapOf(
+                        "phone" to maskedNumber,
+                        "alert_type" to alertType,
+                        "detail" to detail,
+                        "message_length" to message.length
+                    ))
                 } else {
                     val msg = "SMS refusé par le système : $errorLabel (code=$resultCode)"
                     AppLogger.e(Constants.TAG, msg)
