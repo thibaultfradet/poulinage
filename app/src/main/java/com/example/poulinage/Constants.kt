@@ -83,6 +83,7 @@ object Constants {
     // -------------------------------------------------------------------------
     const val ALERT_TYPE_MOVEMENT = "MOUVEMENT"
     const val ALERT_TYPE_ROTATION = "ROTATION"
+    const val ALERT_TYPE_STOP     = "ARRET"
 
     // -------------------------------------------------------------------------
     // Broadcast Service → Activity

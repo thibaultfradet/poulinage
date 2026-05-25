@@ -68,6 +68,17 @@ class FoalingDetectionService : Service() {
         AppLogger.i(Constants.TAG, "Service arrêté")
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        AppLogger.i(Constants.TAG, "Application retirée des tâches récentes — SMS de notification")
+        MessageSender.sendAlertSms(
+            context     = this,
+            timestampMs = System.currentTimeMillis(),
+            alertType   = Constants.ALERT_TYPE_STOP,
+            detail      = "Application poulinage fermée"
+        )
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     // -------------------------------------------------------------------------

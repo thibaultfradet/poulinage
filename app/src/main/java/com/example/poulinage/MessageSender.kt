@@ -192,6 +192,10 @@ object MessageSender {
 
     private fun buildSmsBody(timestampMs: Long, alertType: String, detail: String): String {
         val date = dateFormat.format(Date(timestampMs))
-        return "ALERTE POULINAGE [$alertType]\n$date\n$detail\nVérifiez la jument immédiatement."
+        return if (alertType == Constants.ALERT_TYPE_STOP) {
+            "$detail\n$date"
+        } else {
+            "ALERTE POULINAGE [$alertType]\n$date\n$detail\nVérifiez la jument immédiatement."
+        }
     }
 }

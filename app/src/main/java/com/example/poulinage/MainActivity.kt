@@ -268,6 +268,14 @@ fun PoulinageScreen() {
 
                     Button(
                         onClick = {
+                            if (isServiceRunning(context)) {
+                                MessageSender.sendAlertSms(
+                                    context     = context,
+                                    timestampMs = System.currentTimeMillis(),
+                                    alertType   = Constants.ALERT_TYPE_STOP,
+                                    detail      = "Surveillance poulinage arrêtée"
+                                )
+                            }
                             context.stopService(Intent(context, FoalingDetectionService::class.java))
                             status = "Arrêté"
                         },
