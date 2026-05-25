@@ -76,12 +76,18 @@ private enum class Screen { Home, History, Settings }
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        RemoteLogger.init(this)
         enableEdgeToEdge()
         setContent {
             PoulinageTheme {
                 PoulinageScreen()
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RemoteLogger.flushQueue(applicationContext)
     }
 }
 

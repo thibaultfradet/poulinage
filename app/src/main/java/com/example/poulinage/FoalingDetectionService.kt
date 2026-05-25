@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -35,6 +38,7 @@ class FoalingDetectionService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var accelerometerHandler: AccelerometerHandler? = null
     private var rotationDetector: RotationDetector? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.FRANCE)
 
@@ -49,10 +53,12 @@ class FoalingDetectionService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        RemoteLogger.init(this)
         createNotificationChannel()
         startForeground(Constants.NOTIFICATION_ID, buildNotification("Surveillance en cours..."))
         acquireWakeLock()
         startMonitoring()
+        registerNetworkCallback()
         AppLogger.i(Constants.TAG, "Service démarré")
     }
 
@@ -62,6 +68,7 @@ class FoalingDetectionService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        unregisterNetworkCallback()
         stopMonitoring()
         releaseWakeLock()
         broadcastStatus("Surveillance arrêtée")
@@ -75,7 +82,7 @@ class FoalingDetectionService : Service() {
             context     = this,
             timestampMs = System.currentTimeMillis(),
             alertType   = Constants.ALERT_TYPE_STOP,
-            detail      = "Application poulinage fermée"
+            detail      = "Application fermée"
         )
     }
 
@@ -138,8 +145,28 @@ class FoalingDetectionService : Service() {
     }
 
     // -------------------------------------------------------------------------
-    // Surveillance
+    // Reconnexion réseau → envoi des logs en attente
     // -------------------------------------------------------------------------
+
+    private fun registerNetworkCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                RemoteLogger.flushQueue(applicationContext)
+            }
+        }
+        networkCallback = callback
+        cm.registerDefaultNetworkCallback(callback)
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+        networkCallback?.let {
+            getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it)
+        }
+        networkCallback = null
+    }
 
     private fun startMonitoring() {
         // Détection grands mouvements (accéléromètre)
