@@ -23,13 +23,6 @@ object Constants {
     const val PREF_MIN_ROTATION_SAMPLES     = "min_rotation_samples"
     const val PREF_WINDOW_SIZE_MS           = "window_size_ms"
 
-    // Config SMTP conservée pour EmailSender (non utilisé par le service actuellement)
-    const val PREF_SMTP_HOST          = "smtp_host"
-    const val PREF_SMTP_PORT          = "smtp_port"
-    const val PREF_SMTP_USER          = "smtp_user"
-    const val PREF_SMTP_PASSWORD      = "smtp_password"
-    const val PREF_EMAIL_DEST         = "email_destination"
-
     // -------------------------------------------------------------------------
     // Détection mouvement (accéléromètre)
     // -------------------------------------------------------------------------

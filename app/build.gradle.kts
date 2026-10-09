@@ -68,10 +68,6 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)
 
-    // JavaMail for Android — SMTP email without opening an email app
-    implementation(libs.android.mail)
-    implementation(libs.android.activation)
-
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
