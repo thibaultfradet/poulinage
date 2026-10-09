@@ -1,1 +1,0 @@
-Pour toute question meme minime pose les pour avoir un résultat proche de la perfection
