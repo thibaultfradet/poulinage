@@ -6,8 +6,6 @@ Foaling usually happens at night and goes fast, and a mare in difficulty needs s
 
 It was built for a breeder and is used in production. The client wanted to reuse phones they already owned, many of them old and low-end, so the app is written in **native Kotlin** to stay light and reliable on that hardware (Android 8.1 and up).
 
-<!-- Screenshots: add 2–3 images here, e.g. home, history and settings screens. -->
-
 ## How it works
 
 The app runs as a foreground service with a wake lock, so it keeps monitoring with the screen off and is restarted by the system if it gets killed.
